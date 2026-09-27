@@ -225,6 +225,6 @@ fn save_seen(staging_dir: &Path, account: &str, seen: &HashSet<String>) -> Resul
         .collect::<Vec<_>>()
         .join("\n");
     out.push('\n');
-    std::fs::write(seen_path(staging_dir, account), out)?;
+    crate::fs_guard::write_refusing_symlinks(&seen_path(staging_dir, account), out.as_bytes())?;
     Ok(())
 }

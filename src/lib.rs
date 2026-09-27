@@ -17,3 +17,4 @@ pub mod status;
 
 #[cfg(feature = "fetch")]
 pub mod fetchers;
+pub mod fs_guard;

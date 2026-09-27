@@ -52,7 +52,7 @@ pub fn ensure_journal(journal: &std::path::Path) -> Result<()> {
                 .parent()
                 .context("journal path has no parent directory")?,
         )?;
-        std::fs::write(journal, "")?;
+        crate::fs_guard::write_refusing_symlinks(journal, b"")?;
     }
     Ok(())
 }

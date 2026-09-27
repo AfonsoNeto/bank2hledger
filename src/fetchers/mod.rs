@@ -24,7 +24,7 @@ pub struct RawDrop {
 pub fn store_drops(in_dir: &Path, drops: &[RawDrop]) -> Result<usize> {
     std::fs::create_dir_all(in_dir)?;
     for d in drops {
-        std::fs::write(in_dir.join(&d.file_name), &d.contents)?;
+        crate::fs_guard::write_refusing_symlinks(&in_dir.join(&d.file_name), &d.contents)?;
     }
     Ok(drops.len())
 }

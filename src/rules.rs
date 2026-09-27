@@ -75,7 +75,7 @@ pub fn ensure_rules_file(rules_dir: &Path, account: &AccountConfig) -> Result<st
     let path = rules_path(rules_dir, account);
     if !path.exists() {
         std::fs::create_dir_all(rules_dir)?;
-        std::fs::write(&path, generate_starter(account))?;
+        crate::fs_guard::write_refusing_symlinks(&path, generate_starter(account).as_bytes())?;
     }
     Ok(path)
 }

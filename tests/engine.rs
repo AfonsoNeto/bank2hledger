@@ -489,7 +489,7 @@ fn control_characters_in_fields_cannot_inject_journal_content() {
     if !skip_or_panic() {
         return;
     }
-    let mut rig = rig(vec![acct("test-acct", "monzo_csv", "assets:bank:test")]);
+    let rig = rig(vec![acct("test-acct", "monzo_csv", "assets:bank:test")]);
     // The transaction id tries to break out of the comment line and
     // fabricate a second, balance-modifying transaction. It rides in a
     // properly quoted multiline CSV cell — exactly how such an export
