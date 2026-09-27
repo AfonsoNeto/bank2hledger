@@ -26,6 +26,12 @@ const ROW: &str = r#"^(?<day>\d{1,2})\s+(?<mon>[A-Z]{3})\s+(?<desc>.+?)\s+(?<amo
 
 pub fn parse(account: &AccountConfig, path: &Path) -> Result<Vec<Transaction>> {
     let text = pdftotext(path)?;
+    parse_text(account, &text)
+}
+
+/// Parse statement text (as `pdftotext -layout` produces). Split from
+/// `parse` so the layout logic is testable without poppler installed.
+pub(crate) fn parse_text(account: &AccountConfig, text: &str) -> Result<Vec<Transaction>> {
     let re = Regex::new(ROW).context("internal: bad row regex")?;
     let current_year = chrono::Utc::now().year();
 
@@ -66,10 +72,9 @@ pub fn parse(account: &AccountConfig, path: &Path) -> Result<Vec<Transaction>> {
 
     if txs.is_empty() {
         bail!(
-            "aqua_pdf: no transaction rows parsed from {} ({} lines skipped). \
+            "aqua_pdf: no transaction rows parsed ({} lines skipped). \
              The statement layout may differ from what this profile supports — \
              please open an issue with the line format (redact personal data).",
-            path.display(),
             skipped
         );
     }
@@ -97,7 +102,7 @@ fn pdftotext(path: &Path) -> Result<String> {
     String::from_utf8(output.stdout).context("pdftotext produced non-UTF8 output")
 }
 
-fn month_index(mon: &str) -> Result<u32> {
+pub(crate) fn month_index(mon: &str) -> Result<u32> {
     Ok(match mon.to_ascii_uppercase().as_str() {
         "JAN" => 1,
         "FEB" => 2,
@@ -117,7 +122,7 @@ fn month_index(mon: &str) -> Result<u32> {
 
 /// For month m, pick the year that puts the statement within the last ~13
 /// months: the most recent m that isn't in the future.
-fn infer_year(current_year: i32, mon: u32) -> i32 {
+pub(crate) fn infer_year(current_year: i32, mon: u32) -> i32 {
     let now = chrono::Utc::now();
     let candidate = chrono::NaiveDate::from_ymd_opt(current_year, mon, 1).unwrap();
     if candidate <= now.date_naive() {
@@ -128,3 +133,113 @@ fn infer_year(current_year: i32, mon: u32) -> i32 {
 }
 
 use chrono::Datelike;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::AccountConfig;
+    use rust_decimal::Decimal;
+
+    fn acct() -> AccountConfig {
+        AccountConfig {
+            name: "aqua".into(),
+            profile: "aqua_pdf".into(),
+            hledger_account: "liabilities:cards:aqua".into(),
+            generic: None,
+        }
+    }
+
+    const STATEMENT: &str = "\
+Aqua Card Statement  May 2026
+Account: **** 1234        Statement date: 28 May 2026
+
+Date        Description                   Amount        Balance
+01 MAY  CORNER GROCER 4021              12.40        845.60
+02 MAY  CITY COFFEE CO                    3.80         849.40
+03 MAY  PAYMENT RECEIVED - THANK YOU   -120.00        729.40
+04 MAY  FUEL STOP 88                      45.00        774.40
+05 MAY  STREAM SERVICE                    9.99         784.39
+06 MAY  INTEREST CHARGED                  6.12         790.51
+06 MAY  FEE - LATE PAYMENT               12.00         802.51
+
+For queries call the number on the back of your card.
+";
+
+    fn txs() -> Vec<Transaction> {
+        parse_text(&acct(), STATEMENT).unwrap()
+    }
+
+    #[test]
+    fn parses_all_transaction_rows_and_skips_header_footer() {
+        assert_eq!(txs().len(), 7);
+    }
+
+    #[test]
+    fn purchases_are_negative_on_the_liability_account() {
+        let t = txs().into_iter().find(|t| t.payee.contains("CORNER GROCER")).unwrap();
+        assert_eq!(t.amount, Decimal::from_str_exact("-12.40").unwrap());
+        assert_eq!(t.account, "liabilities:cards:aqua");
+        assert_eq!(t.currency, "GBP");
+    }
+
+    #[test]
+    fn payments_and_credits_are_positive() {
+        let t = txs().into_iter().find(|t| t.payee.contains("PAYMENT RECEIVED")).unwrap();
+        assert_eq!(t.amount, Decimal::from_str_exact("120.00").unwrap());
+    }
+
+    #[test]
+    fn thousands_separators_and_pound_signs_parse() {
+        let text = "01 MAY  BIG PURCHASE          £1,234.56   £5,000.00\n";
+        let t = parse_text(&acct(), text).unwrap();
+        assert_eq!(t[0].amount, Decimal::from_str_exact("-1234.56").unwrap());
+    }
+
+    #[test]
+    fn negative_amounts_parse_too() {
+        let text = "01 MAY  REFUND POSTED           -25.00     100.00\n";
+        let t = parse_text(&acct(), text).unwrap();
+        assert_eq!(t[0].amount, Decimal::from_str_exact("25.00").unwrap());
+    }
+
+    #[test]
+    fn dates_get_inferred_year_for_may() {
+        let t = txs().into_iter().next().unwrap();
+        let year = infer_year(chrono::Utc::now().year(), 5);
+        assert_eq!(t.date.to_string(), format!("{year}-05-01"));
+    }
+
+    #[test]
+    fn no_rows_is_a_loud_failure_not_silence() {
+        let err = parse_text(&acct(), "some unrelated text\nmore text\n").unwrap_err().to_string();
+        assert!(err.contains("no transaction rows parsed"), "{err}");
+        assert!(err.contains("lines skipped"), "{err}");
+    }
+
+    #[test]
+    fn month_index_table() {
+        assert_eq!(month_index("JAN").unwrap(), 1);
+        assert_eq!(month_index("dec").unwrap(), 12); // case-insensitive
+        assert!(month_index("XYZ").is_err());
+    }
+
+    #[test]
+    fn infer_year_never_lands_in_the_future() {
+        let now = chrono::Utc::now();
+        for mon in 1..=12 {
+            let y = infer_year(now.year(), mon);
+            let d = chrono::NaiveDate::from_ymd_opt(y, mon, 1).unwrap();
+            assert!(d <= now.date_naive(), "mon {mon} inferred future {d}");
+        }
+    }
+
+    #[test]
+    fn synthetic_pdf_fixture_parses_via_text_layer() {
+        // Mirrors the layout of tests/fixtures/aqua-sample.pdf.
+        let text = "01 MAY  CORNER GROCER 4021              12.40        845.60\n\
+                    02 MAY  CITY COFFEE CO                    3.80         849.40\n";
+        let t = parse_text(&acct(), text).unwrap();
+        assert_eq!(t.len(), 2);
+        assert_eq!(t[1].amount, Decimal::from_str_exact("-3.80").unwrap());
+    }
+}
