@@ -248,12 +248,7 @@ pub fn fetch(config: &Config, c: &MonzoFetcherConfig, since: Option<NaiveDate>) 
         }
         // Page is full: advance the cursor past the newest transaction we've
         // seen and pull again (ids dedup downstream, so overlap is safe).
-        let newest = txs
-            .iter()
-            .filter_map(|t| t.get("created").and_then(|v| v.as_str()))
-            .max()
-            .context("page full but transactions carry no created timestamps")?;
-        cursor = newest.to_string();
+        cursor = advance_cursor(&cursor, &txs, got)?;
         if cursor == since_iso {
             break;
         }
@@ -359,6 +354,26 @@ pub(crate) fn render_monzo_csv(txs: &[Value]) -> Result<String> {
         out.push('\n');
     }
     Ok(out)
+}
+
+/// Compute the next `since` cursor after a full page. Errors when the page
+/// cannot advance the cursor (all timestamps equal to the current cursor):
+/// continuing would re-fetch the same rows forever.
+pub(crate) fn advance_cursor(cursor: &str, txs: &[Value], page_size: usize) -> Result<String> {
+    let newest = txs
+        .iter()
+        .filter_map(|t| t.get("created").and_then(|v| v.as_str()))
+        .max()
+        .with_context(|| {
+            format!("page of {page_size} transactions carries no created timestamps")
+        })?;
+    if newest == cursor {
+        bail!(
+            "pagination stalled at cursor {cursor}: page of {page_size} transactions \
+             shares one timestamp. Re-run with --since to narrow the window."
+        );
+    }
+    Ok(newest.to_string())
 }
 
 pub(crate) fn write_csv_line(fields: &[&str]) -> String {
@@ -531,5 +546,41 @@ mod state_entropy_tests {
         // Two draws must differ; with the old single-byte-modulo scheme a
         // failed /dev/urandom open produced a constant "aaaa…" token.
         assert_ne!(random_state().unwrap(), random_state().unwrap());
+    }
+}
+
+#[cfg(test)]
+mod pagination_tests {
+    use super::*;
+
+    fn tx(created: &str) -> Value {
+        serde_json::json!({ "created": created })
+    }
+
+    #[test]
+    fn cursor_advances_to_newest_timestamp() {
+        let txs = vec![tx("2026-05-01T00:00:00Z"), tx("2026-05-02T00:00:00Z")];
+        let next = advance_cursor("2026-05-01T00:00:00Z", &txs, 2).unwrap();
+        assert_eq!(next, "2026-05-02T00:00:00Z");
+    }
+
+    #[test]
+    fn stalled_page_is_an_error_not_an_infinite_loop() {
+        // 100 transactions all sharing the cursor's timestamp: advancing
+        // would refetch the same page forever.
+        let txs: Vec<Value> = (0..100).map(|_| tx("2026-05-01T00:00:00Z")).collect();
+        let err = advance_cursor("2026-05-01T00:00:00Z", &txs, 100)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("pagination stalled"), "{err}");
+    }
+
+    #[test]
+    fn missing_timestamps_are_a_clear_error() {
+        let txs = vec![serde_json::json!({})];
+        let err = advance_cursor("2026-05-01T00:00:00Z", &txs, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("no created timestamps"), "{err}");
     }
 }

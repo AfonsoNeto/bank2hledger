@@ -28,7 +28,10 @@ impl FetcherState {
     pub fn save(&self, dir: &Path, key: &str) -> Result<()> {
         std::fs::create_dir_all(dir)?;
         let path = dir.join(format!("{key}.json"));
-        crate::fs_guard::write_refusing_symlinks(&path, serde_json::to_string_pretty(&self.values)?.as_bytes())?;
+        crate::fs_guard::write_refusing_symlinks(
+            &path,
+            serde_json::to_string_pretty(&self.values)?.as_bytes(),
+        )?;
         Ok(())
     }
 

@@ -38,7 +38,9 @@ mod tests {
         let target = dir.path().join("drop.csv");
         std::os::unix::fs::symlink(&victim, &target).unwrap();
 
-        let err = write_refusing_symlinks(&target, b"evil").unwrap_err().to_string();
+        let err = write_refusing_symlinks(&target, b"evil")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("symlink"), "{err}");
         // The victim file is untouched.
         assert_eq!(std::fs::read(&victim).unwrap(), b"innocent");

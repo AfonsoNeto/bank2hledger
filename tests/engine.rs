@@ -523,7 +523,9 @@ fn control_characters_in_fields_cannot_inject_journal_content() {
     );
     // The staging CSV carries the sanitized field.
     let staging = std::fs::read_to_string(rig.staging.join("test-acct.csv")).unwrap();
-    assert!(!staging.chars().any(|c| c.is_control() && c != '\n' && c != '\r'));
+    assert!(!staging
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r'));
 }
 
 #[test]
