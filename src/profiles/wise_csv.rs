@@ -140,8 +140,13 @@ mod tests {
             ("02-05-2026", "2026-05-02"),
             ("02/05/2026", "2026-05-02"),
         ] {
-            let csv = format!("TransferWise ID,Date,Amount,Currency,Description\nW1,{d},1.00,GBP,X\n");
-            assert_eq!(parse_str(&csv).unwrap()[0].date.to_string(), want, "input {d}");
+            let csv =
+                format!("TransferWise ID,Date,Amount,Currency,Description\nW1,{d},1.00,GBP,X\n");
+            assert_eq!(
+                parse_str(&csv).unwrap()[0].date.to_string(),
+                want,
+                "input {d}"
+            );
         }
     }
 
@@ -170,14 +175,18 @@ mod tests {
 
     #[test]
     fn bad_date_and_amount_report_row_numbers() {
-        let err = parse_str("TransferWise ID,Date,Amount,Currency,Description\nW1,not-a-date,1.00,GBP,X\n")
-            .unwrap_err()
-            .to_string();
+        let err = parse_str(
+            "TransferWise ID,Date,Amount,Currency,Description\nW1,not-a-date,1.00,GBP,X\n",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("row 2") && err.contains("bad date"), "{err}");
 
-        let err = parse_str("TransferWise ID,Date,Amount,Currency,Description\nW1,2026-05-02,abc,GBP,X\n")
-            .unwrap_err()
-            .to_string();
+        let err = parse_str(
+            "TransferWise ID,Date,Amount,Currency,Description\nW1,2026-05-02,abc,GBP,X\n",
+        )
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("row 2") && err.contains("bad amount"), "{err}");
     }
 }

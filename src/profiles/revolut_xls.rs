@@ -190,7 +190,10 @@ mod tests {
     #[test]
     fn fee_only_rows_become_negative_outflows() {
         let txs = parse_fixture("revolut-edge.xls");
-        let fee = txs.iter().find(|t| t.notes.as_deref() == Some("FEE")).unwrap();
+        let fee = txs
+            .iter()
+            .find(|t| t.notes.as_deref() == Some("FEE"))
+            .unwrap();
         assert_eq!(fee.amount, Decimal::from_str_exact("-1.00").unwrap());
         // Empty description falls back to the type.
         assert_eq!(fee.payee, "Revolut FEE");
@@ -222,12 +225,20 @@ mod tests {
         let txs = parse_fixture("revolut-edge.xls");
         // "2026-05-02 09:00" (no seconds)
         assert_eq!(
-            txs.iter().find(|t| t.payee == "Bakery Lane").unwrap().date.to_string(),
+            txs.iter()
+                .find(|t| t.payee == "Bakery Lane")
+                .unwrap()
+                .date
+                .to_string(),
             "2026-05-02"
         );
         // "2026-05-03" (bare date)
         assert_eq!(
-            txs.iter().find(|t| t.payee == "Bare date transfer").unwrap().date.to_string(),
+            txs.iter()
+                .find(|t| t.payee == "Bare date transfer")
+                .unwrap()
+                .date
+                .to_string(),
             "2026-05-03"
         );
     }
@@ -236,7 +247,10 @@ mod tests {
     fn string_and_float_amount_cells_both_parse() {
         let txs = parse_fixture("revolut-edge.xls");
         assert_eq!(
-            txs.iter().find(|t| t.payee == "String amount").unwrap().amount,
+            txs.iter()
+                .find(|t| t.payee == "String amount")
+                .unwrap()
+                .amount,
             Decimal::from_str_exact("-7.77").unwrap()
         );
     }

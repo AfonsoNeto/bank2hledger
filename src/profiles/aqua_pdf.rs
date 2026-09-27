@@ -176,7 +176,10 @@ For queries call the number on the back of your card.
 
     #[test]
     fn purchases_are_negative_on_the_liability_account() {
-        let t = txs().into_iter().find(|t| t.payee.contains("CORNER GROCER")).unwrap();
+        let t = txs()
+            .into_iter()
+            .find(|t| t.payee.contains("CORNER GROCER"))
+            .unwrap();
         assert_eq!(t.amount, Decimal::from_str_exact("-12.40").unwrap());
         assert_eq!(t.account, "liabilities:cards:aqua");
         assert_eq!(t.currency, "GBP");
@@ -184,7 +187,10 @@ For queries call the number on the back of your card.
 
     #[test]
     fn payments_and_credits_are_positive() {
-        let t = txs().into_iter().find(|t| t.payee.contains("PAYMENT RECEIVED")).unwrap();
+        let t = txs()
+            .into_iter()
+            .find(|t| t.payee.contains("PAYMENT RECEIVED"))
+            .unwrap();
         assert_eq!(t.amount, Decimal::from_str_exact("120.00").unwrap());
     }
 
@@ -211,7 +217,9 @@ For queries call the number on the back of your card.
 
     #[test]
     fn no_rows_is_a_loud_failure_not_silence() {
-        let err = parse_text(&acct(), "some unrelated text\nmore text\n").unwrap_err().to_string();
+        let err = parse_text(&acct(), "some unrelated text\nmore text\n")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("no transaction rows parsed"), "{err}");
         assert!(err.contains("lines skipped"), "{err}");
     }

@@ -340,8 +340,11 @@ mod tests {
     #[test]
     fn empty_accounts_list_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let err = Config::load(&write_config(dir.path(), "journal = \"j\"\naccounts = []\n"))
-            .unwrap_err();
+        let err = Config::load(&write_config(
+            dir.path(),
+            "journal = \"j\"\naccounts = []\n",
+        ))
+        .unwrap_err();
         assert!(err.to_string().contains("no [[accounts]]"), "{err}");
     }
 
@@ -369,7 +372,10 @@ mod tests {
         let body = minimal_body("");
         let body = body.replace("monzo_csv", "chase_zip");
         let err = Config::load(&write_config(dir.path(), &body)).unwrap_err();
-        assert!(err.to_string().contains("unknown profile 'chase_zip'"), "{err}");
+        assert!(
+            err.to_string().contains("unknown profile 'chase_zip'"),
+            "{err}"
+        );
         assert!(err.to_string().contains("generic_csv"), "{err}");
     }
 
@@ -378,7 +384,11 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let body = minimal_body("").replace("monzo_csv", "generic_csv");
         let err = Config::load(&write_config(dir.path(), &body)).unwrap_err();
-        assert!(err.to_string().contains("requires an [accounts.generic] spec"), "{err}");
+        assert!(
+            err.to_string()
+                .contains("requires an [accounts.generic] spec"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -398,7 +408,11 @@ mod tests {
         let cfg = Config::load(&write_config(dir.path(), &minimal_body(""))).unwrap();
         assert!(cfg.account("a").is_ok());
         assert!(cfg.account("A").is_err());
-        assert!(cfg.account("missing").unwrap_err().to_string().contains("unknown account"));
+        assert!(cfg
+            .account("missing")
+            .unwrap_err()
+            .to_string()
+            .contains("unknown account"));
     }
 
     #[cfg(feature = "fetch")]
@@ -449,7 +463,14 @@ mod tests {
         let cfg = Config::load(&path).unwrap();
         assert_eq!(cfg.accounts.len(), 1); // monzo-personal active as the example
         let t = Config::template();
-        for mention in ["revolut_xls", "aqua_pdf", "wise_csv", "generic_csv", "type = \"monzo\"", "type = \"wise\""] {
+        for mention in [
+            "revolut_xls",
+            "aqua_pdf",
+            "wise_csv",
+            "generic_csv",
+            "type = \"monzo\"",
+            "type = \"wise\"",
+        ] {
             assert!(t.contains(mention), "template missing {mention}");
         }
     }

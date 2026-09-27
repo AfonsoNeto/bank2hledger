@@ -186,7 +186,11 @@ mod tests {
     #[test]
     fn signed_amount_column() {
         let spec = base_spec();
-        let txs = run(&spec, "Date,Merchant,Amount\n01/05/2026,Kiosk,-5.50\n02/05/2026,Refund,12.00\n").unwrap();
+        let txs = run(
+            &spec,
+            "Date,Merchant,Amount\n01/05/2026,Kiosk,-5.50\n02/05/2026,Refund,12.00\n",
+        )
+        .unwrap();
         assert_eq!(txs[0].amount, Decimal::from_str_exact("-5.50").unwrap());
         assert_eq!(txs[1].amount, Decimal::from_str_exact("12.00").unwrap());
         assert_eq!(txs[0].date.to_string(), "2026-05-01");
@@ -198,7 +202,11 @@ mod tests {
         spec.amount_column = None;
         spec.amount_in_column = Some("In".into());
         spec.amount_out_column = Some("Out".into());
-        let txs = run(&spec, "Date,Merchant,In,Out\n01/05/2026,Kiosk,,5.50\n02/05/2026,Refund,12.00,\n").unwrap();
+        let txs = run(
+            &spec,
+            "Date,Merchant,In,Out\n01/05/2026,Kiosk,,5.50\n02/05/2026,Refund,12.00,\n",
+        )
+        .unwrap();
         assert_eq!(txs[0].amount, Decimal::from_str_exact("-5.50").unwrap());
         assert_eq!(txs[1].amount, Decimal::from_str_exact("12.00").unwrap());
     }
@@ -249,7 +257,9 @@ mod tests {
     #[test]
     fn unknown_header_column_errors_clearly() {
         let spec = base_spec();
-        let err = run(&spec, "Date,Shop,Amount\n01/05/2026,Kiosk,-1\n").unwrap_err().to_string();
+        let err = run(&spec, "Date,Shop,Amount\n01/05/2026,Kiosk,-1\n")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("column 'Merchant' not found"), "{err}");
     }
 
@@ -257,14 +267,18 @@ mod tests {
     fn out_of_range_index_is_rejected() {
         let mut spec = base_spec();
         spec.date_column = "9".into();
-        let err = run(&spec, "Date,Merchant,Amount\n").unwrap_err().to_string();
+        let err = run(&spec, "Date,Merchant,Amount\n")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("out of range"), "{err}");
     }
 
     #[test]
     fn bad_date_reports_value_and_format() {
         let spec = base_spec();
-        let err = run(&spec, "Date,Merchant,Amount\n2026-05-01,Kiosk,-1\n").unwrap_err().to_string();
+        let err = run(&spec, "Date,Merchant,Amount\n2026-05-01,Kiosk,-1\n")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("2026-05-01"), "{err}");
         assert!(err.contains("%d/%m/%Y"), "{err}");
     }
@@ -292,7 +306,9 @@ mod tests {
         let neither = base_spec();
         let mut neither = neither;
         neither.currency = None;
-        let err = run(&neither, "Date,Merchant,Amount\n01/05/2026,Kiosk,-5\n").unwrap_err().to_string();
+        let err = run(&neither, "Date,Merchant,Amount\n01/05/2026,Kiosk,-5\n")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("`currency` or `currency_column`"), "{err}");
     }
 
@@ -300,14 +316,20 @@ mod tests {
     fn id_column_enables_external_ids_and_blanks_are_dropped() {
         let mut spec = base_spec();
         spec.id_column = Some("Ref".into());
-        let txs = run(&spec, "Date,Merchant,Amount,Ref\n01/05/2026,A,-1,X1\n02/05/2026,B,-2,\n").unwrap();
+        let txs = run(
+            &spec,
+            "Date,Merchant,Amount,Ref\n01/05/2026,A,-1,X1\n02/05/2026,B,-2,\n",
+        )
+        .unwrap();
         assert_eq!(txs[0].external_id.as_deref(), Some("X1"));
         assert_eq!(txs[1].external_id, None);
     }
 
     #[test]
     fn missing_spec_is_a_clear_error() {
-        let err = parse(&acct(None), b"Date,Merchant,Amount\n").unwrap_err().to_string();
+        let err = parse(&acct(None), b"Date,Merchant,Amount\n")
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("missing [accounts.generic]"), "{err}");
     }
 }

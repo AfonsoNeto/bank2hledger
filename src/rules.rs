@@ -109,17 +109,29 @@ mod tests {
         let out = generate_starter(&acct("m", "assets:bank:m"));
         let catch_all = out.find("account2 expenses:other").unwrap();
         let first_if = out.find("\nif\n").unwrap();
-        assert!(catch_all < first_if, "catch-all must precede if-blocks:\n{out}");
+        assert!(
+            catch_all < first_if,
+            "catch-all must precede if-blocks:\n{out}"
+        );
     }
 
     #[test]
-    fn every_seed_regex_is_ERE_safe() {
+    fn every_seed_regex_is_ere_safe() {
         // hledger uses POSIX ERE (regex-tdfa): (?i) flags and lookarounds
         // would be generated as broken rules. Guard against future edits.
         for (pattern, _) in SEEDS {
-            assert!(!pattern.contains("(?i"), "inline flags unsupported: {pattern}");
-            assert!(!pattern.contains("(?=") && !pattern.contains("(?!"), "lookarounds unsupported: {pattern}");
-            assert!(!pattern.contains("(?<"), "lookbehind unsupported: {pattern}");
+            assert!(
+                !pattern.contains("(?i"),
+                "inline flags unsupported: {pattern}"
+            );
+            assert!(
+                !pattern.contains("(?=") && !pattern.contains("(?!"),
+                "lookarounds unsupported: {pattern}"
+            );
+            assert!(
+                !pattern.contains("(?<"),
+                "lookbehind unsupported: {pattern}"
+            );
         }
     }
 
