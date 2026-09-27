@@ -2,6 +2,11 @@
 
 Import bank transactions into your [hledger](https://hledger.org) journal — from file exports or live bank APIs — with deduplication, categorization rules, and a **review-before-you-approve** workflow.
 
+Two front-ends share one core library (`crates/bank2hledger`):
+
+- a **CLI** (macOS, Linux, Windows) for terminal-driven workflows, and
+- a **Windows GUI app** (`crates/bank2hledger-gui`) styled after Windows 11 Settings, for the same drop → preview → import → verify loop without a terminal.
+
 Built for the reality of modern banking: you can't always get a clean API, but you can almost always get an export. bank2hledger treats a dropped export and an API fetch identically, so you can mix both freely — and move banks or add banks without touching your workflow.
 
 ```console
@@ -18,6 +23,18 @@ $ bank2hledger import               # add them
 $ bank2hledger status               # balances, to compare with the bank app
 $ git commit                        # your approval
 ```
+
+## The Windows GUI
+
+The same review-before-you-approve workflow, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark). Drop exports in, preview what's new, import, verify:
+
+![Import page: per-account cards with a preview table of new transactions before importing](docs/screenshots/import-preview.png)
+
+![Home: quick actions, workspace paths, and a setup checklist including an hledger check](docs/screenshots/home.png)
+
+![Balances: current hledger balances of the configured accounts for comparison with the bank apps](docs/screenshots/balances.png)
+
+![Rules: the per-account hledger CSV rules files, which bank2hledger generates once and never rewrites](docs/screenshots/rules.png)
 
 ## Why not just `hledger import`?
 
@@ -43,11 +60,25 @@ Contributions for more banks are very welcome — Starling, Chase UK, NatWest, N
 
 ## Install
 
+### CLI (macOS / Linux / Windows)
+
 ```console
 $ cargo install bank2hledger      # or grab a binary from Releases
 ```
 
 Requires [hledger](https://hledger.org/install.html) on `$PATH`. Aqua PDF parsing additionally needs `pdftotext` (poppler-utils).
+
+### Windows GUI
+
+Three ways to install (all from [GitHub Releases](https://github.com/AfonsoNeto/bank2hledger/releases)):
+
+| Channel | File | Notes |
+|---------|------|-------|
+| Installer | `bank2hledger-gui_*_x64-setup.exe` (NSIS) or `*.msi` | double-click, installs to Program Files |
+| Portable | `bank2hledger-gui_*-portable.zip` | unzip and run — no installation |
+| MSIX | `bank2hledger-gui_*.msix` | for Microsoft Store submission / managed deployment (unsigned builds need sideloading enabled and a signature) |
+
+The GUI needs [hledger](https://hledger.org/install.html) installed (e.g. `winget install hledger.hledger`); it checks on startup and tells you if it's missing. The app itself has no other runtime dependencies — it renders with WebView2, which is built into Windows 11 (and updated automatically on Windows 10). API fetchers are not available in the GUI yet; use the CLI for those.
 
 ## Setup
 
@@ -82,9 +113,22 @@ $ bank2hledger fetch
 
 ## Development
 
+This repo is a Cargo workspace:
+
+```
+crates/bank2hledger        # core library + CLI (this is what crates.io ships)
+crates/bank2hledger-gui    # Windows GUI: Tauri 2 + Fluent UI (React) frontend
+```
+
 ```console
-$ cargo test                      # parser + end-to-end tests (uses real hledger if present)
-$ cargo build --no-default-features   # verify the offline core builds without fetchers
+$ cargo test -p bank2hledger          # parser + end-to-end tests (uses real hledger if present)
+$ cargo build -p bank2hledger --no-default-features   # verify the offline core builds without fetchers
+
+# GUI development (Node.js ≥ 18 required):
+$ cd crates/bank2hledger-gui
+$ npm install
+$ npm run tauri dev                   # hot-reloading GUI dev loop
+$ npm run tauri build                 # release build + NSIS/MSI installers
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/adding-a-profile.md](docs/adding-a-profile.md).
