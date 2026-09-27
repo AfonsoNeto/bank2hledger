@@ -1,0 +1,25 @@
+# Rust
+/target
+Cargo.lock.bak
+
+# Second line of defense: never commit financial data or secrets, even by accident.
+*.journal
+*.hledger
+*.ledger
+*.csv
+*.xls
+*.xlsx
+*.pdf
+*.ofx
+*token*
+*secret*
+credentials.*
+
+# Local config if someone points the tool at this directory
+bank2hledger.toml
+bank2hledger.yaml
+
+# Exception: anonymized test fixtures only (see CONTRIBUTING.md — fixtures
+# must contain synthetic or fully anonymized data).
+!tests/fixtures/*
+!tests/fixtures/**

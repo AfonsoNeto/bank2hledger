@@ -1,0 +1,5 @@
+TransferWise ID,Date,Amount,Currency,Description,Source currency amount,Source currency,Exchange rate,Running Balance
+WID-anon-0001,2026-05-02 09:15:00,250.00,GBP,Add money from bank,250.00,GBP,1.0,1250.00
+WID-anon-0002,2026-05-03 14:20:00,-18.60,GBP,Corner Grocer,-18.60,GBP,1.0,1231.40
+WID-anon-0003,2026-05-05 10:00:00,-45.00,EUR,Hotel Helios,-38.70,GBP,0.86,1192.70
+WID-anon-0004,2026-05-08 16:45:00,-6.50,GBP,City Coffee Co,-6.50,GBP,1.0,1186.20

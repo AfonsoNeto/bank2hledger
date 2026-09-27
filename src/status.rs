@@ -1,0 +1,70 @@
+//! `status`: show current balances of the configured bank accounts so the
+//! user can compare against the real numbers in their bank apps.
+
+use std::process::Command;
+
+use anyhow::{bail, Context, Result};
+
+use crate::config::Config;
+use crate::engine::hledger_cmd;
+
+pub fn run(config: &Config, accounts: &[String]) -> Result<()> {
+    let wanted: Vec<&str> = if accounts.is_empty() {
+        config
+            .accounts
+            .iter()
+            .map(|a| a.hledger_account.as_str())
+            .collect()
+    } else {
+        accounts
+            .iter()
+            .map(|name| Ok(config.account(name)?.hledger_account.as_str()))
+            .collect::<Result<Vec<_>>>()?
+    };
+    if wanted.is_empty() {
+        bail!("no accounts configured");
+    }
+
+    let mut cmd = hledger_cmd();
+    cmd.arg("bal")
+        .arg("-f")
+        .arg(&config.journal)
+        .args(&wanted)
+        .arg("--flat");
+    let output = cmd
+        .output()
+        .context("running hledger — is it installed and on PATH? (or set $HLEDGER)")?;
+    if !output.status.success() {
+        bail!(
+            "hledger bal failed:\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    print!("{}", String::from_utf8_lossy(&output.stdout));
+    Ok(())
+}
+
+/// Ensure the journal file exists so first imports don't fail confusingly.
+pub fn ensure_journal(journal: &std::path::Path) -> Result<()> {
+    if !journal.exists() {
+        std::fs::create_dir_all(
+            journal
+                .parent()
+                .context("journal path has no parent directory")?,
+        )?;
+        std::fs::write(journal, "")?;
+    }
+    Ok(())
+}
+
+/// Used by `import` to refuse to touch a journal that doesn't exist yet.
+pub fn require_journal(journal: &std::path::Path) -> Result<()> {
+    if !journal.exists() {
+        bail!(
+            "journal {} does not exist — create it (or fix `journal =` in the config) first",
+            journal.display()
+        );
+    }
+    let _ = Command::new("true");
+    Ok(())
+}

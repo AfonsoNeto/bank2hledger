@@ -1,0 +1,31 @@
+Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In
+tx_anon0000,01/05/2026,04:40:51,Direct Debit,Corner Grocer,,Bills,-8.75,GBP,-8.75,GBP,,,,Corner Grocer,,-8.75,
+tx_anon0001,01/05/2026,10:17:11,Faster payment,City Coffee Co,,Transfers,-1200.00,GBP,-1200.00,GBP,,,,City Coffee Co,,-1200.00,
+tx_anon0002,05/05/2026,03:01:15,Direct Debit,ACME Utilities,,Bills,-19.65,GBP,-19.65,GBP,,,,ACME Utilities,,-19.65,
+tx_anon0003,05/05/2026,03:01:58,Direct Debit,Local Gym,,Bills,-566.82,GBP,-566.82,GBP,,,,Local Gym,,-566.82,
+tx_anon0004,08/05/2026,03:10:34,Direct Debit,Book Nook,,Bills,-11.99,GBP,-11.99,GBP,,,,Book Nook,,-11.99,
+tx_anon0005,09/05/2026,10:32:00,Monzo-to-Monzo,Fuel Stop,,Transfers,100.00,GBP,100.00,GBP,,,,Fuel Stop,,,100.00
+tx_anon0006,10/05/2026,08:39:02,Faster payment,City Coffee Co,,Transfers,-100.00,GBP,-100.00,GBP,,,,City Coffee Co,,-100.00,
+tx_anon0007,12/05/2026,21:01:44,Card payment,Pharmacy Plus,,Entertainment,-2.99,GBP,-2.99,GBP,,,,Pharmacy Plus,,-2.99,
+tx_anon0008,12/05/2026,21:01:44,Pot transfer,Sandwich Bar,,Savings,-0.01,GBP,-0.01,GBP,,,,Sandwich Bar,,-0.01,
+tx_anon0009,26/05/2026,21:44:52,Faster payment,City Coffee Co,,Transfers,1100.00,GBP,1100.00,GBP,,,,City Coffee Co,,,1100.00
+tx_anon0010,26/05/2026,21:50:26,Faster payment,Clothing Co,,General,-1020.00,GBP,-1020.00,GBP,,,,Clothing Co,,-1020.00,
+tx_anon0011,28/05/2026,18:08:19,Faster payment,City Coffee Co,,Transfers,-100.00,GBP,-100.00,GBP,,,,City Coffee Co,,-100.00,
+tx_anon0012,29/05/2026,06:18:42,Faster payment,Stream Service,,Income,3914.21,GBP,3914.21,GBP,,,,Stream Service,,,3914.21
+tx_anon0013,29/05/2026,06:27:36,Faster payment,City Coffee Co,,Transfers,-3914.21,GBP,-3914.21,GBP,,,,City Coffee Co,,-3914.21,
+tx_anon0014,31/05/2026,20:47:11,Card payment,Handy Hardware,,Bills,-10.00,GBP,-10.00,GBP,,,,Handy Hardware,,-10.00,
+tx_anon0015,01/06/2026,04:29:16,Direct Debit,Bake Shop,,Bills,-482.14,GBP,-482.14,GBP,,,,Bake Shop,,-482.14,
+tx_anon0016,01/06/2026,14:14:48,Faster payment,City Coffee Co,,Transfers,1050.00,GBP,1050.00,GBP,,,,City Coffee Co,,,1050.00
+tx_anon0017,02/06/2026,03:01:27,Direct Debit,ACME Utilities,,Bills,-9.59,GBP,-9.59,GBP,,,,ACME Utilities,,-9.59,
+tx_anon0018,03/06/2026,03:02:26,Direct Debit,Local Gym,,Bills,-1031.14,GBP,-1031.14,GBP,,,,Local Gym,,-1031.14,
+tx_anon0019,03/06/2026,08:20:22,Pot transfer,Sandwich Bar,,Savings,3.23,GBP,3.23,GBP,,,,Sandwich Bar,,,3.23
+tx_anon0020,05/06/2026,03:12:27,Direct Debit,Corner Grocer,,Bills,-8.75,GBP,-8.75,GBP,,,,Corner Grocer,,-8.75,
+tx_anon0021,07/06/2026,21:34:09,Faster payment,City Coffee Co,,Transfers,20.00,GBP,20.00,GBP,,,,City Coffee Co,,,20.00
+tx_anon0022,09/06/2026,03:05:18,Direct Debit,Book Nook,,Bills,-11.99,GBP,-11.99,GBP,,,,Book Nook,,-11.99,
+tx_anon0023,12/06/2026,21:02:08,Card payment,Pharmacy Plus,,Entertainment,-2.99,GBP,-2.99,GBP,,,,Pharmacy Plus,,-2.99,
+tx_anon0024,12/06/2026,21:02:09,Pot transfer,Sandwich Bar,,Savings,-0.01,GBP,-0.01,GBP,,,,Sandwich Bar,,-0.01,
+tx_anon0025,17/06/2026,12:16:02,Faster payment,Veg Box Co,,Transfers,69.00,GBP,69.00,GBP,,,,Veg Box Co,,,69.00
+tx_anon0026,17/06/2026,14:55:58,Faster payment,City Coffee Co,,Transfers,-50.00,GBP,-50.00,GBP,,,,City Coffee Co,,-50.00,
+tx_anon0027,28/06/2026,21:18:41,Faster payment,Stream Service,,Income,3914.20,GBP,3914.20,GBP,,,,Stream Service,,,3914.20
+tx_anon0028,30/06/2026,03:09:31,Direct Debit,Bake Shop,,Bills,-482.14,GBP,-482.14,GBP,,,,Bake Shop,,-482.14,
+tx_anon0029,30/06/2026,08:15:01,Faster payment,City Coffee Co,,Transfers,-2000.00,GBP,-2000.00,GBP,,,,City Coffee Co,,-2000.00,

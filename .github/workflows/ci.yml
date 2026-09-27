@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Install hledger and poppler
+        run: sudo apt-get update && sudo apt-get install -y hledger poppler-utils
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Tests (with fetchers)
+        run: cargo test
+      - name: Offline core builds without network code
+        run: cargo build --no-default-features
+      - name: No-telemetry smoke check
+        run: |
+          # The binary must not link any telemetry-ish crates: assert none in the tree.
+          cargo tree --no-default-features | grep -iE "sentry|analytics|mixpanel|posthog|amplitude" && exit 1 || true
