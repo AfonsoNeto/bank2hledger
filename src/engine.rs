@@ -18,6 +18,7 @@ use crate::model::Transaction;
 use crate::profiles;
 use crate::rules;
 
+#[derive(Debug)]
 pub struct ImportOutcome {
     pub account: String,
     pub new_count: usize,
