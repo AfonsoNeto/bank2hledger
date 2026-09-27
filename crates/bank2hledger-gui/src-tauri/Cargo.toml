@@ -1,0 +1,24 @@
+[package]
+name = "bank2hledger-gui"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+description = "Windows 11-style desktop GUI for bank2hledger."
+license.workspace = true
+repository.workspace = true
+readme = "../../README.md"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+bank2hledger = { path = "../../bank2hledger", default-features = false }
+anyhow = "1.0"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+dirs = "5.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"

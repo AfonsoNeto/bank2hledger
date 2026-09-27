@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/bank2hledger"]
+members = ["crates/bank2hledger", "crates/bank2hledger-gui/src-tauri"]
 
 [workspace.package]
 edition = "2021"

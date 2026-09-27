@@ -25,3 +25,8 @@ bank2hledger.yaml
 !tests/fixtures/**
 !crates/bank2hledger/tests/fixtures/*
 !crates/bank2hledger/tests/fixtures/**
+
+# GUI frontend (crates/bank2hledger-gui)
+node_modules/
+crates/bank2hledger-gui/dist/
+crates/bank2hledger-gui/src-tauri/gen/
