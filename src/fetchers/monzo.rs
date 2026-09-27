@@ -60,8 +60,10 @@ pub fn auth(config: &Config, c: &MonzoFetcherConfig) -> Result<()> {
         secret.trim().to_string()
     };
 
-    // Browser flow.
-    let state: String = (0..24).map(|_| rand_char()).collect();
+    // Browser flow. The state parameter is the CSRF guard for the callback:
+    // it must be unpredictable or a local attacker can complete the flow with
+    // their own code. Fail closed if the OS randomness source is unavailable.
+    let state = random_state()?;
     let listener = TcpListener::bind((REDIRECT_HOST, c.redirect_port)).with_context(|| {
         format!(
             "binding 127.0.0.1:{} — is another process using it?",
@@ -406,12 +408,17 @@ fn redact_status(status: Option<reqwest::StatusCode>) -> String {
         .unwrap_or_else(|| "network error".into())
 }
 
-// Small non-crypto state value for CSRF protection; not used as a secret.
-fn rand_char() -> char {
-    let mut b = [0u8; 1];
-    let _ = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b));
-    const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
-    ALPHABET[b[0] as usize % ALPHABET.len()] as char
+/// Cryptographically random OAuth `state` value (128-bit, URL-safe hex).
+/// Fails closed: without OS randomness the auth flow must not proceed.
+fn random_state() -> anyhow::Result<String> {
+    let mut bytes = [0u8; 16];
+    getrandom::getrandom(&mut bytes).map_err(|e| {
+        anyhow::anyhow!(
+            "cannot read OS randomness ({e}) — refusing to start OAuth flow \
+             (CSRF state must be unpredictable)"
+        )
+    })?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
 #[cfg(test)]
@@ -505,5 +512,24 @@ mod tests {
         assert_eq!(write_csv_line(&["plain"]), "plain");
         assert_eq!(write_csv_line(&["a,b"]), "\"a,b\"");
         assert_eq!(write_csv_line(&["say \"hi\""]), "\"say \"\"hi\"\"\"");
+    }
+}
+
+#[cfg(test)]
+mod state_entropy_tests {
+    use super::*;
+
+    #[test]
+    fn state_is_hex_and_full_length() {
+        let s = random_state().unwrap();
+        assert_eq!(s.len(), 32);
+        assert!(s.chars().all(|c| c.is_ascii_hexdigit()), "{s}");
+    }
+
+    #[test]
+    fn state_is_unpredictable_across_calls() {
+        // Two draws must differ; with the old single-byte-modulo scheme a
+        // failed /dev/urandom open produced a constant "aaaa…" token.
+        assert_ne!(random_state().unwrap(), random_state().unwrap());
     }
 }
