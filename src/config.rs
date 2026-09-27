@@ -242,6 +242,7 @@ hledger_account = "assets:banks:monzo:personal"
             if !seen.insert(a.name.as_str()) {
                 bail!("duplicate account name: {}", a.name);
             }
+            validate_account_name(&a.name)?;
             match a.profile.as_str() {
                 "monzo_csv" | "revolut_xls" | "wise_csv" | "aqua_pdf" => {}
                 "generic_csv" if a.generic.is_some() => {}
@@ -271,6 +272,28 @@ hledger_account = "assets:banks:monzo:personal"
             .iter()
             .find(|a| a.name == name)
             .with_context(|| format!("unknown account '{}'", name))
+    }
+}
+
+/// Account names become filename components (`<name>.rules`,
+/// `<name>-monzo-<stamp>.csv`, `<name>.seen`). Restrict them to a safe
+/// charset so a mistyped or hostile config cannot write outside the data
+/// directories (path traversal via `../`, absolute paths, dotfiles).
+fn validate_account_name(name: &str) -> Result<()> {
+    let ok = !name.is_empty()
+        && !name.starts_with('.')
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ' '))
+        && !name.contains("..");
+    if ok {
+        Ok(())
+    } else {
+        bail!(
+            "invalid account name '{}': use letters, digits, '-', '_', '.' or spaces \
+             (it is used as a filename component)",
+            name
+        );
     }
 }
 
@@ -353,6 +376,35 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let err = Config::load(&write_config(dir.path(), "journal = \"j\"")).unwrap_err();
         assert!(err.to_string().contains("parsing config"), "{err}");
+    }
+
+    #[test]
+    fn account_names_reject_path_traversal_and_unsafe_characters() {
+        for bad in [
+            "../evil",
+            "a/b",
+            "/abs",
+            ".hidden",
+            "a..b",
+            "",
+            "semi;colon",
+            "tab\tname",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let body = minimal_body("").replace("name = \"a\"", &format!("name = \"{}\"", bad));
+            let err = Config::load(&write_config(dir.path(), &body))
+                .unwrap_err()
+                .to_string();
+            assert!(err.contains("invalid account name"), "{bad}: {err}");
+        }
+        for good in ["monzo-personal", "revolut_pro", "wise 2026", "acct.1"] {
+            let dir = tempfile::tempdir().unwrap();
+            let body = minimal_body("").replace("name = \"a\"", &format!("name = \"{}\"", good));
+            assert!(
+                Config::load(&write_config(dir.path(), &body)).is_ok(),
+                "{good}"
+            );
+        }
     }
 
     #[test]
