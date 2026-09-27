@@ -123,10 +123,8 @@ pub fn fetch(config: &Config, c: &WiseFetcherConfig, since: Option<NaiveDate>) -
     let client = client();
     for currency in &c.currencies {
         let mut csv_out: Option<String> = None;
-        let mut chunk_start = start;
         let mut total = 0usize;
-        while chunk_start < now {
-            let chunk_end = std::cmp::min(chunk_start + Duration::days(MAX_CHUNK_DAYS), now);
+        for (chunk_start, chunk_end) in chunk_windows(start, now) {
             let (csv, rows) = export_csv(
                 &client,
                 &token,
@@ -146,7 +144,6 @@ pub fn fetch(config: &Config, c: &WiseFetcherConfig, since: Option<NaiveDate>) -
                 }
                 None => csv_out = Some(csv),
             }
-            chunk_start = chunk_end;
         }
         if let Some(csv) = csv_out {
             let stamp = now.format("%Y%m%d-%H%M%S");
@@ -239,4 +236,66 @@ fn export_csv(
         }
     }
     bail!("statement export did not complete in time")
+}
+
+/// Split `[start, end)` into consecutive windows of at most
+/// `MAX_CHUNK_DAYS` days (the API caps statement intervals at 30).
+pub(crate) fn chunk_windows(
+    start: chrono::DateTime<Utc>,
+    end: chrono::DateTime<Utc>,
+) -> Vec<(chrono::DateTime<Utc>, chrono::DateTime<Utc>)> {
+    let mut out = Vec::new();
+    let mut cursor = start;
+    while cursor < end {
+        let next = std::cmp::min(cursor + Duration::days(MAX_CHUNK_DAYS), end);
+        out.push((cursor, next));
+        cursor = next;
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn windows_respect_the_thirty_day_cap() {
+        let start = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 4, 1, 0, 0, 0).unwrap(); // 90 days
+        let windows = chunk_windows(start, end);
+        assert_eq!(windows.len(), 4);
+        // Contiguous and non-overlapping coverage.
+        assert_eq!(windows[0].0, start);
+        assert_eq!(windows.last().unwrap().1, end);
+        for w in windows.windows(2) {
+            assert_eq!(w[0].1, w[1].0, "windows must tile the interval");
+        }
+        for w in &windows {
+            let days = (w.1 - w.0).num_days();
+            assert!(days <= MAX_CHUNK_DAYS, "window too wide: {days} days");
+            assert!(days > 0);
+        }
+    }
+
+    #[test]
+    fn interval_shorter_than_cap_is_one_window() {
+        let start = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 5, 10, 0, 0, 0).unwrap();
+        let windows = chunk_windows(start, end);
+        assert_eq!(windows.len(), 1);
+        assert_eq!(windows[0], (start, end));
+    }
+
+    #[test]
+    fn empty_interval_yields_no_windows() {
+        let t = Utc.with_ymd_and_hms(2026, 5, 1, 0, 0, 0).unwrap();
+        assert!(chunk_windows(t, t).is_empty());
+    }
+
+    #[test]
+    fn token_key_is_per_account() {
+        assert_eq!(token_key("wise-personal"), "wise:wise-personal:token");
+        assert_ne!(token_key("a"), token_key("b"));
+    }
 }

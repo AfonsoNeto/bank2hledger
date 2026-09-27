@@ -278,7 +278,7 @@ pub fn fetch(config: &Config, c: &MonzoFetcherConfig, since: Option<NaiveDate>) 
 
 /// Render transactions into the same column layout as the app's CSV export,
 /// so `monzo_csv` parses fetcher output and manual exports identically.
-fn render_monzo_csv(txs: &[Value]) -> Result<String> {
+pub(crate) fn render_monzo_csv(txs: &[Value]) -> Result<String> {
     let mut out = String::from(
         "Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In\n",
     );
@@ -359,7 +359,7 @@ fn render_monzo_csv(txs: &[Value]) -> Result<String> {
     Ok(out)
 }
 
-fn write_csv_line(fields: &[&str]) -> String {
+pub(crate) fn write_csv_line(fields: &[&str]) -> String {
     fields
         .iter()
         .map(|f| {
@@ -373,7 +373,7 @@ fn write_csv_line(fields: &[&str]) -> String {
         .join(",")
 }
 
-fn extract_param(request: &str, name: &str) -> Option<String> {
+pub(crate) fn extract_param(request: &str, name: &str) -> Option<String> {
     let line = request.lines().next()?;
     let query = line.split_whitespace().nth(1)?; // "GET /path?query HTTP/1.1"
     let query = query.split('?').nth(1)?;
@@ -387,7 +387,7 @@ fn extract_param(request: &str, name: &str) -> Option<String> {
     None
 }
 
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::new();
     for b in s.bytes() {
         match b {
@@ -412,4 +412,98 @@ fn rand_char() -> char {
     let _ = std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(&mut b));
     const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
     ALPHABET[b[0] as usize % ALPHABET.len()] as char
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_output_round_trips_through_monzo_csv_profile() {
+        let txs = vec![
+            serde_json::json!({
+                "id": "tx_1",
+                "created": "2026-05-01T09:00:00Z",
+                "category": "transfers",
+                "amount": "-8.75",
+                "currency": "GBP",
+                "local_amount": "-8.75",
+                "local_currency": "GBP",
+                "notes": "note text",
+                "description": "Some Merchant",
+                "merchant": {"name": "Some Merchant Ltd"},
+                "scheme": "faster_payment",
+            }),
+            serde_json::json!({
+                "id": "tx_2",
+                "created": "2026-05-02T23:30:00Z",
+                "category": "bills",
+                "amount": "25.00",
+                "currency": "GBP",
+                "is_load": true,
+                "description": "Top-up from bank",
+            }),
+        ];
+        let csv = render_monzo_csv(&txs).unwrap();
+
+        // The rendered CSV must parse with the file profile — the fetcher is
+        // a drop-in for a manual export.
+        let account = crate::config::AccountConfig {
+            name: "m".into(),
+            profile: "monzo_csv".into(),
+            hledger_account: "assets:bank:m".into(),
+            generic: None,
+        };
+        let parsed = crate::profiles::monzo_csv::parse(&account, csv.as_bytes()).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].external_id.as_deref(), Some("tx_1"));
+        assert_eq!(
+            parsed[0].payee, "Some Merchant Ltd",
+            "expanded merchant name wins"
+        );
+        assert_eq!(parsed[0].amount.to_string(), "-8.75");
+        assert_eq!(parsed[0].date.to_string(), "2026-05-01");
+        // is_load becomes a Top up row; money in is positive.
+        assert_eq!(parsed[1].payee, "Top-up from bank");
+        assert_eq!(parsed[1].amount.to_string(), "25.00");
+        assert_eq!(parsed[1].notes.as_deref(), Some("time:23:30:00"));
+    }
+
+    #[test]
+    fn render_quotes_fields_containing_commas() {
+        let txs = vec![serde_json::json!({
+            "id": "tx_1",
+            "created": "2026-05-01T09:00:00Z",
+            "amount": "-1.00",
+            "currency": "GBP",
+            "description": "Shop, Ltd",
+        })];
+        let csv = render_monzo_csv(&txs).unwrap();
+        assert!(csv.contains("\"Shop, Ltd\""), "{csv}");
+    }
+
+    #[test]
+    fn extract_param_finds_code_and_state() {
+        let req = "GET /?code=abc123&state=xyz789 HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        assert_eq!(extract_param(req, "code").as_deref(), Some("abc123"));
+        assert_eq!(extract_param(req, "state").as_deref(), Some("xyz789"));
+        assert_eq!(extract_param(req, "missing"), None);
+        assert_eq!(extract_param("", "code"), None);
+    }
+
+    #[test]
+    fn urlencode_escapes_reserved_characters() {
+        assert_eq!(
+            urlencode("http://localhost:8765"),
+            "http%3A%2F%2Flocalhost%3A8765"
+        );
+        assert_eq!(urlencode("a-b_c.d~e"), "a-b_c.d~e");
+    }
+
+    #[test]
+    fn write_csv_line_quotes_and_doubles_quotes() {
+        assert_eq!(write_csv_line(&["plain"]), "plain");
+        assert_eq!(write_csv_line(&["a,b"]), "\"a,b\"");
+        assert_eq!(write_csv_line(&["say \"hi\""]), "\"say \"\"hi\"\"\"");
+    }
 }

@@ -62,3 +62,53 @@ impl FetcherState {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_state_file_loads_as_default() {
+        let dir = tempfile::tempdir().unwrap();
+        let st = FetcherState::load(dir.path(), "nope").unwrap();
+        assert_eq!(st.last_fetch(), None);
+        assert_eq!(st.get_str("anything"), None);
+    }
+
+    #[test]
+    fn save_load_round_trip_preserves_all_value_types() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut st = FetcherState::default();
+        st.set(
+            "monzo_account_id",
+            serde_json::Value::String("acc_1".into()),
+        );
+        st.set("profile_id", serde_json::Value::Number(42.into()));
+        st.set_last_fetch(Utc::now());
+        st.save(dir.path(), "k").unwrap();
+
+        let loaded = FetcherState::load(dir.path(), "k").unwrap();
+        assert_eq!(loaded.get_str("monzo_account_id").as_deref(), Some("acc_1"));
+        assert_eq!(loaded.get_u64("profile_id"), Some(42));
+        assert!(loaded.last_fetch().is_some());
+        // Timestamps must round-trip exactly (gap-free fetches depend on it).
+        assert_eq!(loaded.last_fetch(), st.last_fetch());
+    }
+
+    #[test]
+    fn keys_are_namespaced_per_fetcher() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut a = FetcherState::default();
+        a.set("k", serde_json::Value::String("a".into()));
+        a.save(dir.path(), "monzo:acct1").unwrap();
+        let b = FetcherState::load(dir.path(), "monzo:acct2").unwrap();
+        assert_eq!(b.get_str("k"), None);
+    }
+
+    #[test]
+    fn corrupt_state_file_is_an_error_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("k.json"), "{not json").unwrap();
+        assert!(FetcherState::load(dir.path(), "k").is_err());
+    }
+}

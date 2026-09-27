@@ -108,3 +108,46 @@ fn redact(msg: &str) -> String {
     }
     out.trim().to_string()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Works against the real keychain when available; otherwise exercises
+    /// the 0600-file fallback. Either path must round-trip.
+    #[test]
+    fn store_load_delete_round_trip() {
+        let key = "test:round-trip:secret";
+        store(key, "s3cret-value").unwrap();
+        assert_eq!(load(key).unwrap().as_deref(), Some("s3cret-value"));
+        delete(key).unwrap();
+        assert_eq!(load(key).unwrap(), None);
+    }
+
+    #[test]
+    fn overwriting_a_secret_replaces_it() {
+        let key = "test:overwrite:secret";
+        store(key, "first").unwrap();
+        store(key, "second").unwrap();
+        assert_eq!(load(key).unwrap().as_deref(), Some("second"));
+        delete(key).unwrap();
+    }
+
+    #[test]
+    fn fallback_files_never_embed_raw_key_characters() {
+        // The sanitized file name must be filesystem-safe for keys with ':'.
+        assert_eq!(
+            sanitize("monzo:acct-1:refresh_token"),
+            "monzo_acct-1_refresh_token"
+        );
+    }
+
+    #[test]
+    fn redact_masks_long_token_like_words() {
+        let msg = "error with token ABCDEFGHIJKLMNOPQRSTUVWXYZ012345 inside";
+        let out = redact(msg);
+        assert!(!out.contains("ABCDEFGHIJKLMNOP"), "{out}");
+        assert!(out.contains("<redacted>"), "{out}");
+        assert!(out.contains("error"), "{out}");
+    }
+}
