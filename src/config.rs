@@ -174,6 +174,8 @@ journal = "2026.journal"
 # Per-account hledger CSV rules files live here; edit them freely.
 #rules_dir = "rules"
 
+# Built-in profiles: monzo_csv, revolut_xls, wise_csv, aqua_pdf, generic_csv
+
 [[accounts]]
 name = "monzo-personal"
 profile = "monzo_csv"
@@ -278,6 +280,177 @@ impl FetcherConfig {
         match self {
             FetcherConfig::Monzo(c) => &c.account,
             FetcherConfig::Wise(c) => &c.account,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn write_config(dir: &std::path::Path, body: &str) -> PathBuf {
+        let path = dir.join("bank2hledger.toml");
+        std::fs::write(&path, body).unwrap();
+        path
+    }
+
+    fn minimal_body(extra: &str) -> String {
+        format!(
+            "journal = \"j.journal\"\n[[accounts]]\nname = \"a\"\nprofile = \"monzo_csv\"\n\
+             hledger_account = \"assets:a\"\n{extra}"
+        )
+    }
+
+    #[test]
+    fn loads_and_resolves_relative_paths_against_config_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(dir.path(), &minimal_body(""));
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.journal, dir.path().join("j.journal"));
+        assert_eq!(cfg.in_dir, dir.path().join("in"));
+        assert_eq!(cfg.staging_dir, dir.path().join("staging"));
+        assert_eq!(cfg.rules_dir, dir.path().join("rules"));
+    }
+
+    #[test]
+    fn absolute_paths_are_preserved() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = "journal = \"/tmp/somewhere/j.journal\"\n\
+                    in_dir = \"/tmp/somewhere/in\"\n[[accounts]]\nname = \"a\"\n\
+                    profile = \"monzo_csv\"\nhledger_account = \"assets:a\"\n";
+        let cfg = Config::load(&write_config(dir.path(), body)).unwrap();
+        assert_eq!(cfg.journal, PathBuf::from("/tmp/somewhere/j.journal"));
+        assert_eq!(cfg.in_dir, PathBuf::from("/tmp/somewhere/in"));
+    }
+
+    #[test]
+    fn missing_file_is_a_clear_error() {
+        let err = Config::load(Path::new("/nonexistent/bank2hledger.toml")).unwrap_err();
+        assert!(err.to_string().contains("reading config"), "{err}");
+    }
+
+    #[test]
+    fn malformed_toml_is_a_parse_error_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Config::load(&write_config(dir.path(), "journal = [unclosed")).unwrap_err();
+        assert!(err.to_string().contains("parsing config"), "{err}");
+    }
+
+    #[test]
+    fn empty_accounts_list_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Config::load(&write_config(dir.path(), "journal = \"j\"\naccounts = []\n"))
+            .unwrap_err();
+        assert!(err.to_string().contains("no [[accounts]]"), "{err}");
+    }
+
+    #[test]
+    fn missing_accounts_key_is_a_parse_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Config::load(&write_config(dir.path(), "journal = \"j\"")).unwrap_err();
+        assert!(err.to_string().contains("parsing config"), "{err}");
+    }
+
+    #[test]
+    fn duplicate_account_names_are_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!(
+            "{}\n[[accounts]]\nname = \"a\"\nprofile = \"monzo_csv\"\nhledger_account = \"assets:b\"\n",
+            minimal_body("")
+        );
+        let err = Config::load(&write_config(dir.path(), &body)).unwrap_err();
+        assert!(err.to_string().contains("duplicate account name"), "{err}");
+    }
+
+    #[test]
+    fn unknown_profile_is_rejected_with_known_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = minimal_body("");
+        let body = body.replace("monzo_csv", "chase_zip");
+        let err = Config::load(&write_config(dir.path(), &body)).unwrap_err();
+        assert!(err.to_string().contains("unknown profile 'chase_zip'"), "{err}");
+        assert!(err.to_string().contains("generic_csv"), "{err}");
+    }
+
+    #[test]
+    fn generic_csv_without_spec_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = minimal_body("").replace("monzo_csv", "generic_csv");
+        let err = Config::load(&write_config(dir.path(), &body)).unwrap_err();
+        assert!(err.to_string().contains("requires an [accounts.generic] spec"), "{err}");
+    }
+
+    #[test]
+    fn generic_csv_with_spec_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!(
+            "{}\n[accounts.generic]\ndate_column = \"Date\"\ndate_format = \"%d/%m/%Y\"\n\
+             description_column = \"M\"\namount_column = \"A\"\n",
+            minimal_body("").replace("monzo_csv", "generic_csv")
+        );
+        assert!(Config::load(&write_config(dir.path(), &body)).is_ok());
+    }
+
+    #[test]
+    fn account_lookup_is_case_sensitive_and_errors_cleanly() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config::load(&write_config(dir.path(), &minimal_body(""))).unwrap();
+        assert!(cfg.account("a").is_ok());
+        assert!(cfg.account("A").is_err());
+        assert!(cfg.account("missing").unwrap_err().to_string().contains("unknown account"));
+    }
+
+    #[cfg(feature = "fetch")]
+    #[test]
+    fn fetcher_referencing_unknown_account_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!(
+            "{}\n[[fetchers]]\ntype = \"monzo\"\naccount = \"nope\"\nclient_id = \"x\"\n",
+            minimal_body("")
+        );
+        let err = Config::load(&write_config(dir.path(), &body)).unwrap_err();
+        assert!(err.to_string().contains("unknown account 'nope'"), "{err}");
+    }
+
+    #[cfg(feature = "fetch")]
+    #[test]
+    fn fetcher_configs_deserialize_with_defaults() {
+        let dir = tempfile::tempdir().unwrap();
+        let body = format!(
+            "{}\n[[fetchers]]\ntype = \"monzo\"\naccount = \"a\"\nclient_id = \"cid\"\n\
+             \n[[fetchers]]\ntype = \"wise\"\naccount = \"a\"\ncurrencies = [\"GBP\"]\n",
+            minimal_body("")
+        );
+        let cfg = Config::load(&write_config(dir.path(), &body)).unwrap();
+        assert_eq!(cfg.fetchers.len(), 2);
+        match &cfg.fetchers[0] {
+            FetcherConfig::Monzo(c) => {
+                assert_eq!(c.redirect_port, 8765);
+                assert_eq!(c.base_url, "https://api.monzo.com");
+            }
+            _ => panic!("expected monzo"),
+        }
+        match &cfg.fetchers[1] {
+            FetcherConfig::Wise(c) => {
+                assert_eq!(c.profile_id, None);
+                assert_eq!(c.base_url, "https://api.wise.com");
+            }
+            _ => panic!("expected wise"),
+        }
+    }
+
+    #[test]
+    fn template_parses_and_mentions_all_builtins() {
+        // The template keeps everything active-but-minimal: it must parse, and
+        // it must document every profile and both fetchers.
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_config(dir.path(), Config::template());
+        let cfg = Config::load(&path).unwrap();
+        assert_eq!(cfg.accounts.len(), 1); // monzo-personal active as the example
+        let t = Config::template();
+        for mention in ["revolut_xls", "aqua_pdf", "wise_csv", "generic_csv", "type = \"monzo\"", "type = \"wise\""] {
+            assert!(t.contains(mention), "template missing {mention}");
         }
     }
 }
