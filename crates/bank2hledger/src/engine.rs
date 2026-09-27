@@ -57,6 +57,48 @@ pub fn run(
     Ok(outcomes)
 }
 
+/// Parsed, dedup-checked transactions for one account — without writing
+/// staging CSVs or invoking hledger. The GUI uses this for its review
+/// table; the CLI equivalent is [`run`] with `dry_run = true`.
+#[derive(Debug)]
+pub struct PreviewOutcome {
+    pub account: String,
+    pub new: Vec<Transaction>,
+    pub already_seen: usize,
+}
+
+pub fn preview_account(
+    config: &Config,
+    account_name: &str,
+    since: Option<NaiveDate>,
+) -> Result<PreviewOutcome> {
+    let account = config.account(account_name)?;
+    let files = collect_files(&config.in_dir, account_name)?;
+    let mut txs = Vec::new();
+    for file in &files {
+        txs.extend(profiles::parse_file(account, file)?);
+    }
+    if let Some(since) = since {
+        txs.retain(|t| t.date >= since);
+    }
+    txs.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.payee.cmp(&b.payee)));
+
+    let seen = load_seen(&config.staging_dir, account_name)?;
+    let mut outcome = PreviewOutcome {
+        account: account_name.to_string(),
+        new: Vec::new(),
+        already_seen: 0,
+    };
+    for tx in txs {
+        if seen.contains(&tx.dedup_key()) {
+            outcome.already_seen += 1;
+        } else {
+            outcome.new.push(tx);
+        }
+    }
+    Ok(outcome)
+}
+
 fn import_account(
     config: &Config,
     account: &crate::config::AccountConfig,

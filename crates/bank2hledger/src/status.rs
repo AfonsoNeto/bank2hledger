@@ -9,6 +9,13 @@ use crate::config::Config;
 use crate::engine::hledger_cmd;
 
 pub fn run(config: &Config, accounts: &[String]) -> Result<()> {
+    print!("{}", balances(config, accounts)?);
+    Ok(())
+}
+
+/// Run `hledger bal` and return its output as text, so callers other than
+/// the CLI (the GUI) can display it however they like.
+pub fn balances(config: &Config, accounts: &[String]) -> Result<String> {
     let wanted: Vec<&str> = if accounts.is_empty() {
         config
             .accounts
@@ -40,8 +47,7 @@ pub fn run(config: &Config, accounts: &[String]) -> Result<()> {
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    print!("{}", String::from_utf8_lossy(&output.stdout));
-    Ok(())
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Ensure the journal file exists so first imports don't fail confusingly.
