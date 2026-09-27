@@ -1,4 +1,17 @@
 import { invoke } from "@tauri-apps/api/core";
+import * as mock from "./mock";
+
+// When the Tauri IPC bridge is absent (plain `npm run dev` in a browser),
+// fall back to the synthetic mock in mock.ts so the UI can be developed and
+// screenshotted without the Rust backend.
+const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
+function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  if (!inTauri) {
+    return mock.handle(cmd, args) as Promise<T>;
+  }
+  return invoke<T>(cmd, args);
+}
 
 export interface AccountInfo {
   name: string;
@@ -58,33 +71,33 @@ export interface FileEntry {
 }
 
 export function loadWorkspace(path: string | null): Promise<WorkspaceInfo> {
-  return invoke("load_workspace", { path });
+  return call("load_workspace", { path });
 }
 
 export function initWorkspace(dir: string, force: boolean): Promise<WorkspaceInfo> {
-  return invoke("init_workspace", { dir, force });
+  return call("init_workspace", { dir, force });
 }
 
 export function inboxFiles(): Promise<AccountInbox[]> {
-  return invoke("inbox_files");
+  return call("inbox_files");
 }
 
 export function previewImport(account: string): Promise<PreviewDto> {
-  return invoke("preview_import", { account });
+  return call("preview_import", { account });
 }
 
 export function runImport(account: string, dryRun: boolean): Promise<ImportResult> {
-  return invoke("run_import", { account, dryRun });
+  return call("run_import", { account, dryRun });
 }
 
 export function getStatus(): Promise<string> {
-  return invoke("get_status");
+  return call("get_status");
 }
 
 export function listRulesFiles(): Promise<FileEntry[]> {
-  return invoke("list_rules_files");
+  return call("list_rules_files");
 }
 
 export function openPath(path: string): Promise<void> {
-  return invoke("open_path", { path });
+  return call("open_path", { path });
 }
