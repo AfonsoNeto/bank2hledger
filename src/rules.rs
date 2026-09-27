@@ -79,3 +79,92 @@ pub fn ensure_rules_file(rules_dir: &Path, account: &AccountConfig) -> Result<st
     }
     Ok(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn acct(name: &str, hledger: &str) -> AccountConfig {
+        AccountConfig {
+            name: name.into(),
+            profile: "monzo_csv".into(),
+            hledger_account: hledger.into(),
+            generic: None,
+        }
+    }
+
+    #[test]
+    fn starter_binds_account1_and_staging_columns() {
+        let out = generate_starter(&acct("m", "assets:bank:m"));
+        assert!(out.contains("account1 assets:bank:m"), "{out}");
+        assert!(out.contains("fields date, description, amount, currency, id"));
+        assert!(out.contains("date-format %Y-%m-%d"));
+        assert!(out.contains("comment bank2hledger-id:%id"));
+    }
+
+    #[test]
+    fn catch_all_comes_before_specific_blocks() {
+        // hledger: later matching assignments win, so the catch-all must be
+        // written first and the if-blocks after it.
+        let out = generate_starter(&acct("m", "assets:bank:m"));
+        let catch_all = out.find("account2 expenses:other").unwrap();
+        let first_if = out.find("\nif\n").unwrap();
+        assert!(catch_all < first_if, "catch-all must precede if-blocks:\n{out}");
+    }
+
+    #[test]
+    fn every_seed_regex_is_ERE_safe() {
+        // hledger uses POSIX ERE (regex-tdfa): (?i) flags and lookarounds
+        // would be generated as broken rules. Guard against future edits.
+        for (pattern, _) in SEEDS {
+            assert!(!pattern.contains("(?i"), "inline flags unsupported: {pattern}");
+            assert!(!pattern.contains("(?=") && !pattern.contains("(?!"), "lookarounds unsupported: {pattern}");
+            assert!(!pattern.contains("(?<"), "lookbehind unsupported: {pattern}");
+        }
+    }
+
+    #[test]
+    fn uber_eats_is_mapped_after_uber() {
+        // "later wins": for "UBER EATS" both patterns match, so delivery must
+        // appear after transport in the generated file.
+        let out = generate_starter(&acct("m", "assets:bank:m"));
+        let transport = out.find("uber|bolt|lyft").unwrap();
+        let delivery = out.find("uber ?eats").unwrap();
+        assert!(transport < delivery);
+    }
+
+    #[test]
+    fn ensure_creates_missing_file_and_is_idempotent() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("rules");
+        let a = acct("test-acct", "assets:bank:test");
+        let p1 = ensure_rules_file(&rules_dir, &a).unwrap();
+        assert!(p1.exists());
+        let p2 = ensure_rules_file(&rules_dir, &a).unwrap();
+        assert_eq!(p1, p2);
+        assert_eq!(rules_dir.join("test-acct.rules"), p1);
+    }
+
+    #[test]
+    fn user_edits_are_never_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let rules_dir = dir.path().join("rules");
+        std::fs::create_dir_all(&rules_dir).unwrap();
+        let a = acct("test-acct", "assets:bank:test");
+        let path = rules_dir.join("test-acct.rules");
+        std::fs::write(&path, "# my precious hand-written rules\nfields date\n").unwrap();
+        ensure_rules_file(&rules_dir, &a).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "# my precious hand-written rules\nfields date\n"
+        );
+    }
+
+    #[test]
+    fn rules_path_uses_account_name() {
+        assert_eq!(
+            rules_path(Path::new("/r"), &acct("monzo-personal", "x")),
+            Path::new("/r").join("monzo-personal.rules")
+        );
+    }
+}
