@@ -13,7 +13,26 @@ fn fallback_path(key: &str) -> Result<std::path::PathBuf> {
         .join("bank2hledger")
         .join("secrets");
     std::fs::create_dir_all(&dir)?;
+    tighten_dir_permissions(&dir)?;
     Ok(dir.join(sanitize(key)))
+}
+
+/// The fallback directory holds secrets: it must not be group/world readable
+/// regardless of umask or pre-existing loose permissions.
+#[cfg(unix)]
+fn tighten_dir_permissions(dir: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(dir)?.permissions();
+    if perms.mode() & 0o777 != 0o700 {
+        perms.set_mode(0o700);
+        std::fs::set_permissions(dir, perms)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn tighten_dir_permissions(_dir: &std::path::Path) -> Result<()> {
+    Ok(())
 }
 
 fn sanitize(key: &str) -> String {
@@ -41,23 +60,30 @@ pub fn store(key: &str, secret: &str) -> Result<()> {
                 redact(&e.to_string())
             );
             let path = fallback_path(key)?;
-            #[cfg(unix)]
-            {
-                use std::io::Write;
-                use std::os::unix::fs::OpenOptionsExt;
-                let mut f = std::fs::OpenOptions::new()
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .mode(0o600)
-                    .open(&path)?;
-                f.write_all(secret.as_bytes())?;
-            }
-            #[cfg(not(unix))]
-            std::fs::write(&path, secret)?;
+            crate::fs_guard::write_refusing_symlinks(&path, secret.as_bytes())?;
+            enforce_secret_file_permissions(&path)?;
             Ok(())
         }
     }
+}
+
+/// 0600 must hold on every write, not only at creation — a file that
+/// pre-existed with looser permissions (e.g. from a umask change) would
+/// otherwise keep them.
+#[cfg(unix)]
+fn enforce_secret_file_permissions(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let mut perms = std::fs::metadata(path)?.permissions();
+    if perms.mode() & 0o777 != 0o600 {
+        perms.set_mode(0o600);
+        std::fs::set_permissions(path, perms)?;
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn enforce_secret_file_permissions(_path: &std::path::Path) -> Result<()> {
+    Ok(())
 }
 
 pub fn load(key: &str) -> Result<Option<String>> {
@@ -69,6 +95,20 @@ pub fn load(key: &str) -> Result<Option<String>> {
         },
         Err(_) => load_fallback(key),
     }
+}
+
+#[cfg(unix)]
+#[cfg(test)]
+pub(crate) fn fallback_store_for_test(key: &str, secret: &str) -> Result<std::path::PathBuf> {
+    use std::os::unix::fs::PermissionsExt;
+    let path = fallback_path(key)?;
+    std::fs::write(&path, secret)?;
+    // Simulate a file created under a loose umask before bank2hledger wrote it.
+    let mut loose = std::fs::metadata(&path)?.permissions();
+    loose.set_mode(0o644);
+    std::fs::set_permissions(&path, loose)?;
+    enforce_secret_file_permissions(&path)?;
+    Ok(path)
 }
 
 fn load_fallback(key: &str) -> Result<Option<String>> {
@@ -131,6 +171,30 @@ mod tests {
         store(key, "second").unwrap();
         assert_eq!(load(key).unwrap().as_deref(), Some("second"));
         delete(key).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn loose_preexisting_fallback_file_is_tightened_to_0600() {
+        use std::os::unix::fs::PermissionsExt;
+        let key = "test:fallback:perms";
+        // store() prefers the keychain when available, so exercise the
+        // fallback write path directly.
+        let path = fallback_store_for_test(key, "s3cret").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600, "secret file must be 0600 after write");
+        delete(key).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fallback_secrets_dir_is_0700() {
+        use std::os::unix::fs::PermissionsExt;
+        let key = "test:dir:perms";
+        let path = fallback_path(key).unwrap();
+        let dir = path.parent().unwrap();
+        let mode = std::fs::metadata(dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700, "secrets directory must be 0700");
     }
 
     #[test]
