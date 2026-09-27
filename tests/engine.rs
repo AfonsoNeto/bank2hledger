@@ -480,3 +480,58 @@ fn empty_input_and_unknown_accounts() {
 
     assert!(engine::run(&rig.config, &["ghost".to_string()], false, None).is_err());
 }
+
+/// A malicious export with control characters (e.g. newlines) inside quoted
+/// CSV cells must not be able to inject journal content beyond the intended
+/// transaction: one row in, one transaction out, no embedded newlines.
+#[test]
+fn control_characters_in_fields_cannot_inject_journal_content() {
+    if !skip_or_panic() {
+        return;
+    }
+    let mut rig = rig(vec![acct("test-acct", "monzo_csv", "assets:bank:test")]);
+    // The transaction id tries to break out of the comment line and
+    // fabricate a second, balance-modifying transaction. It rides in a
+    // properly quoted multiline CSV cell — exactly how such an export
+    // would look on disk.
+    let evil_id = "tx_evil\n2026-05-02 Evil\n    assets:bank:test  -9999\n    expenses:other  9999";
+    let evil_id_csv = format!("\"{}\"", evil_id.replace('"', "\"\""));
+    std::fs::write(
+        rig.in_dir.join("test-acct.csv"),
+        format!(
+            "{MONZO_HEADER}{},01/05/2026,10:00:00,CARD_PAYMENT,Shop,,Shopping,-1.00,GBP,-1.00,GBP,,,,Shop,,,-1.00,\n",
+            evil_id_csv,
+        ),
+    )
+    .unwrap();
+
+    engine::run(&rig.config, &[], false, None).unwrap();
+    let text = journal_text(&rig);
+    assert_eq!(
+        text.lines().filter(|l| l.starts_with("20")).count(),
+        1,
+        "exactly one transaction may be created:\n{text}"
+    );
+    // The hostile content survives only flattened onto the inert comment
+    // line; no posting line may reference the injected amount.
+    assert_eq!(
+        text.lines()
+            .filter(|l| l.starts_with(' ') && l.contains("-9999"))
+            .count(),
+        0,
+        "injected posting must not exist:\n{text}"
+    );
+    // The staging CSV carries the sanitized field.
+    let staging = std::fs::read_to_string(rig.staging.join("test-acct.csv")).unwrap();
+    assert!(!staging.chars().any(|c| c.is_control() && c != '\n' && c != '\r'));
+}
+
+#[test]
+fn sanitize_field_replaces_control_chars_keeps_everything_else() {
+    use bank2hledger::engine::sanitize_field;
+    assert_eq!(sanitize_field("Café Ltd — ok"), "Café Ltd — ok");
+    assert_eq!(sanitize_field("line1\nline2"), "line1 line2");
+    assert_eq!(sanitize_field("tab\there"), "tab here");
+    assert_eq!(sanitize_field("nul\u{0}byte"), "nul byte");
+    assert_eq!(sanitize_field("delete\u{7f}char"), "delete char");
+}

@@ -180,14 +180,26 @@ fn write_staging_csv(path: &Path, txs: &[Transaction]) -> Result<()> {
     for tx in txs {
         writer.write_record(&[
             tx.date.format("%Y-%m-%d").to_string(),
-            tx.payee.clone(),
+            sanitize_field(&tx.payee),
             tx.amount.normalize().to_string(),
-            tx.currency.clone(),
-            tx.external_id.clone().unwrap_or_default(),
+            sanitize_field(&tx.currency),
+            sanitize_field(tx.external_id.as_deref().unwrap_or_default()),
         ])?;
     }
     writer.flush()?;
     Ok(())
+}
+
+/// Strip control characters (including newlines) from fields that hledger
+/// rules interpolate into the journal (`description`, `comment %id`,
+/// `currency %currency`). A crafted export with a newline inside a quoted
+/// CSV cell could otherwise inject arbitrary journal content — fake
+/// transactions or balance-affecting postings — beyond the intended entry.
+/// Everything else (spaces, unicode, punctuation) passes through untouched.
+pub fn sanitize_field(s: &str) -> String {
+    s.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
 }
 
 fn seen_path(staging_dir: &Path, account: &str) -> PathBuf {
