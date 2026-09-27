@@ -57,3 +57,60 @@ impl fmt::Display for Transaction {
 /// The generated rules files reference these by position, so the order here
 /// is load-bearing.
 pub const STAGING_COLUMNS: [&str; 5] = ["date", "description", "amount", "currency", "id"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tx(id: Option<&str>, date: &str, payee: &str, amount: &str, currency: &str) -> Transaction {
+        Transaction {
+            date: chrono::NaiveDate::from_ymd_opt(2026, 5, 1).unwrap(),
+            payee: payee.to_string(),
+            amount: rust_decimal::Decimal::from_str_exact(amount).unwrap(),
+            currency: currency.to_string(),
+            account: "assets:bank:test".to_string(),
+            external_id: id.map(String::from),
+            notes: None,
+        }
+    }
+
+    #[test]
+    fn dedup_key_prefers_bank_id() {
+        let t = tx(Some("tx_123"), "2026-05-01", "Coffee", "-3.80", "GBP");
+        assert_eq!(t.dedup_key(), "id:tx_123");
+    }
+
+    #[test]
+    fn dedup_key_synthetic_is_stable_and_discriminating() {
+        let a = tx(None, "2026-05-01", "Coffee", "-3.80", "GBP");
+        let b = tx(None, "2026-05-01", "Coffee", "-3.80", "GBP");
+        let c = tx(None, "2026-05-01", "Coffee", "-3.80", "EUR");
+        let d = tx(None, "2026-05-01", "Coffee", "-4.00", "GBP");
+        let e = tx(None, "2026-05-01", "Other shop", "-3.80", "GBP");
+        assert_eq!(a.dedup_key(), b.dedup_key());
+        // Two identical coffees on the same day must NOT collapse into one.
+        let a2 = tx(None, "2026-05-01", "Coffee", "-3.80", "GBP");
+        assert_eq!(a.dedup_key(), a2.dedup_key());
+        assert_ne!(a.dedup_key(), c.dedup_key());
+        assert_ne!(a.dedup_key(), d.dedup_key());
+        assert_ne!(a.dedup_key(), e.dedup_key());
+    }
+
+    #[test]
+    fn dedup_key_normalizes_trailing_zeros() {
+        let a = tx(None, "2026-05-01", "Coffee", "-3.80", "GBP");
+        let b = tx(None, "2026-05-01", "Coffee", "-3.8", "GBP");
+        assert_eq!(a.amount.normalize(), b.amount.normalize());
+        assert_eq!(a.dedup_key(), b.dedup_key());
+    }
+
+    #[test]
+    fn display_is_human_readable() {
+        let t = tx(Some("tx_1"), "2026-05-01", "Coffee", "-3.8", "GBP");
+        let s = t.to_string();
+        assert!(s.contains("2026-05-01"), "{s}");
+        assert!(s.contains("\"Coffee\""), "{s}");
+        assert!(s.contains("-3.8GBP"), "{s}");
+        assert!(s.contains("assets:bank:test"), "{s}");
+    }
+}
