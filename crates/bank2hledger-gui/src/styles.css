@@ -1,0 +1,15 @@
+/* The window uses Mica (Windows 11 backdrop material), so the app background
+   must stay transparent — Fluent cards paint their own surfaces on top. */
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  overflow: hidden;
+}
+
+pre {
+  font-family: "Cascadia Mono", Consolas, monospace;
+}
