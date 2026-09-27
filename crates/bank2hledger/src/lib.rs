@@ -10,6 +10,7 @@
 pub mod cli;
 pub mod config;
 pub mod engine;
+pub mod init;
 pub mod model;
 pub mod profiles;
 pub mod rules;

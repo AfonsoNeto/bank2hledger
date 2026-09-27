@@ -1,9 +1,9 @@
-use bank2hledger::{cli, config, engine, rules, status};
+use bank2hledger::{cli, config, engine, init, status};
 
 #[cfg(feature = "fetch")]
 use bank2hledger::fetchers;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result};
 use clap::Parser as _;
 use cli::{Cli, Command};
 
@@ -145,40 +145,19 @@ fn load_config(explicit: Option<&std::path::Path>) -> Result<config::Config> {
 }
 
 fn init(explicit: Option<&std::path::Path>, force: bool) -> Result<()> {
-    let path = explicit
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from("bank2hledger.toml"));
-    if path.exists() && !force {
-        bail!(
-            "{} already exists — edit it, or re-run with --force to overwrite (rules files are never touched)",
-            path.display()
-        );
+    let report = init::run(explicit, force)?;
+    println!("wrote {}", report.config_path.display());
+    let base = report
+        .config_path
+        .parent()
+        .unwrap_or(std::path::Path::new("."));
+    for dir in &report.dirs {
+        let rel = dir.strip_prefix(base).unwrap_or(dir);
+        println!("created {}", rel.display());
     }
-    std::fs::write(&path, config::Config::template())?;
-    println!("wrote {}", path.display());
-
-    // If the config parses and has accounts, create directories and starter
-    // rules files. (The template has everything commented out, so a fresh
-    // init only creates the config.)
-    if let Ok(cfg) = config::Config::load(&path) {
-        let base = path.parent().unwrap_or(std::path::Path::new("."));
-        for dir in [&cfg.in_dir, &cfg.staging_dir, &cfg.rules_dir] {
-            std::fs::create_dir_all(dir)?;
-            let rel = dir.strip_prefix(base).unwrap_or(dir);
-            println!("created {}", rel.display());
-        }
-        for account in &cfg.accounts {
-            let p = rules::ensure_rules_file(&cfg.rules_dir, account)?;
-            println!("wrote rules file {}", p.display());
-        }
-        println!(
-            "\nNext: edit {} to name your real accounts, drop exports into {}, and run \
-             `bank2hledger import --dry-run`.",
-            path.display(),
-            cfg.in_dir.display()
-        );
-    } else {
-        println!("\nNext: edit the config — uncomment and fill in your [[accounts]] entries.");
+    for p in &report.rules_files {
+        println!("wrote rules file {}", p.display());
     }
+    println!("\n{}", report.next_step);
     Ok(())
 }
