@@ -23,3 +23,5 @@ bank2hledger.yaml
 # must contain synthetic or fully anonymized data).
 !tests/fixtures/*
 !tests/fixtures/**
+!crates/bank2hledger/tests/fixtures/*
+!crates/bank2hledger/tests/fixtures/**
