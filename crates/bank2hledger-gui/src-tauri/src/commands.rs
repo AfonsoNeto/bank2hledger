@@ -2,6 +2,10 @@
 //! All business logic (parsing, dedup, rules, hledger invocation) lives in
 //! the shared crate — nothing here decides account names or touches files
 //! beyond remembering which workspace the GUI opened last.
+//!
+//! Anything that touches disk or spawns a process runs on the blocking
+//! thread pool (`spawn_blocking`): synchronous commands would run on the
+//! main thread and freeze the window for the duration.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -95,6 +99,14 @@ fn err(e: anyhow::Error) -> String {
     format!("{e:#}")
 }
 
+type WsLock<'a> = std::sync::MutexGuard<'a, Option<Workspace>>;
+
+/// Lock that survives a panic in another command (poisoned mutex) instead of
+/// cascading panics into every later command.
+fn lock_state<'a>(state: &'a tauri::State<AppState>) -> WsLock<'a> {
+    state.workspace.lock().unwrap_or_else(|p| p.into_inner())
+}
+
 /// Where the GUI remembers the last-opened workspace. GUI-local state only —
 /// the core CLI never reads this.
 fn remembered_path_file() -> Option<PathBuf> {
@@ -135,7 +147,11 @@ fn hledger_version() -> Option<String> {
     }
 }
 
-fn workspace_info(config: &config::Config, config_path: &Path) -> WorkspaceInfo {
+fn workspace_info(
+    config: &config::Config,
+    config_path: &Path,
+    hledger_version: Option<String>,
+) -> WorkspaceInfo {
     WorkspaceInfo {
         config_path: config_path.display().to_string(),
         journal: config.journal.display().to_string(),
@@ -158,7 +174,7 @@ fn workspace_info(config: &config::Config, config_path: &Path) -> WorkspaceInfo 
                     }),
             })
             .collect(),
-        hledger_version: hledger_version(),
+        hledger_version,
     }
 }
 
@@ -170,44 +186,64 @@ fn remember_workspace(config_path: &Path) {
     }
 }
 
+/// Clone the loaded workspace out of the state so blocking work can run
+/// without holding the lock.
+fn current_workspace(state: &tauri::State<AppState>) -> Result<(PathBuf, config::Config), String> {
+    let ws = lock_state(state);
+    let ws = ws.as_ref().ok_or("No workspace loaded")?;
+    Ok((ws.config_path.clone(), ws.config.clone()))
+}
+
 // --- commands ---
 
 #[tauri::command]
-pub fn load_workspace(
+pub async fn load_workspace(
     path: Option<String>,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<WorkspaceInfo, String> {
-    let config_path = find_config(path.as_deref()).ok_or_else(|| {
-        "No bank2hledger.toml found — create a new workspace or open an existing config file."
-            .to_string()
-    })?;
-    let config = config::Config::load(&config_path).map_err(err)?;
-    remember_workspace(&config_path);
-    *state.workspace.lock().unwrap() = Some(Workspace {
-        config_path: config_path.clone(),
-        config,
-    });
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().unwrap();
-    Ok(workspace_info(&ws.config, &ws.config_path))
+    let (config_path, config, version) = tauri::async_runtime::spawn_blocking(move || {
+        let config_path = find_config(path.as_deref()).ok_or_else(|| {
+            "No bank2hledger.toml found — create a new workspace or open an existing config file."
+                .to_string()
+        })?;
+        let config = config::Config::load(&config_path).map_err(err)?;
+        remember_workspace(&config_path);
+        Ok::<_, String>((config_path, config, hledger_version()))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
+    let info = {
+        let mut ws = lock_state(&state);
+        *ws = Some(Workspace {
+            config_path: config_path.clone(),
+            config,
+        });
+        workspace_info(&ws.as_ref().unwrap().config, &config_path, version)
+    };
+    Ok(info)
 }
 
 #[tauri::command]
-pub fn init_workspace(
+pub async fn init_workspace(
     dir: String,
     force: bool,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<WorkspaceInfo, String> {
     let config_path = Path::new(&dir).join("bank2hledger.toml");
-    bank2hledger::init::run(Some(&config_path), force).map_err(err)?;
-    load_workspace(Some(config_path.display().to_string()), state)
+    tauri::async_runtime::spawn_blocking({
+        let config_path = config_path.clone();
+        move || bank2hledger::init::run(Some(&config_path), force).map_err(err)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    load_workspace(Some(config_path.display().to_string()), state).await
 }
 
 #[tauri::command]
 pub fn inbox_files(state: tauri::State<AppState>) -> Result<Vec<AccountInbox>, String> {
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().ok_or("No workspace loaded")?;
-    let entries = std::fs::read_dir(&ws.config.in_dir)
+    let (_, config) = current_workspace(&state)?;
+    let entries = std::fs::read_dir(&config.in_dir)
         .map(|rd| {
             rd.filter_map(|e| e.ok())
                 .map(|e| e.path())
@@ -215,8 +251,7 @@ pub fn inbox_files(state: tauri::State<AppState>) -> Result<Vec<AccountInbox>, S
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    Ok(ws
-        .config
+    Ok(config
         .accounts
         .iter()
         .map(|a| {
@@ -250,13 +285,17 @@ pub fn inbox_files(state: tauri::State<AppState>) -> Result<Vec<AccountInbox>, S
 }
 
 #[tauri::command]
-pub fn preview_import(
+pub async fn preview_import(
     account: String,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<PreviewDto, String> {
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().ok_or("No workspace loaded")?;
-    let out = engine::preview_account(&ws.config, &account, None).map_err(err)?;
+    let (_, config) = current_workspace(&state)?;
+    let out = tauri::async_runtime::spawn_blocking(move || {
+        engine::preview_account(&config, &account, None).map_err(err)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+
     Ok(PreviewDto {
         account: out.account,
         already_seen: out.already_seen,
@@ -276,39 +315,42 @@ pub fn preview_import(
 }
 
 #[tauri::command]
-pub fn run_import(
+pub async fn run_import(
     account: String,
     dry_run: bool,
-    state: tauri::State<AppState>,
+    state: tauri::State<'_, AppState>,
 ) -> Result<ImportResult, String> {
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().ok_or("No workspace loaded")?;
-    status::require_journal(&ws.config.journal).map_err(err)?;
-    // engine::run returns exactly one outcome per requested account.
-    let mut outcomes = engine::run(&ws.config, &[account], dry_run, None).map_err(err)?;
-    let o = outcomes
-        .pop()
-        .ok_or_else(|| "engine returned no outcome".to_string())?;
-    Ok(ImportResult {
-        account: o.account,
-        new_count: o.new_count,
-        already_seen: o.already_seen,
-        preview: o.preview,
+    let (_, config) = current_workspace(&state)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        status::require_journal(&config.journal).map_err(err)?;
+        // engine::run returns exactly one outcome per requested account.
+        let mut outcomes = engine::run(&config, &[account], dry_run, None).map_err(err)?;
+        let o = outcomes
+            .pop()
+            .ok_or_else(|| "engine returned no outcome".to_string())?;
+        Ok(ImportResult {
+            account: o.account,
+            new_count: o.new_count,
+            already_seen: o.already_seen,
+            preview: o.preview,
+        })
     })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
-pub fn get_status(state: tauri::State<AppState>) -> Result<String, String> {
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().ok_or("No workspace loaded")?;
-    status::balances(&ws.config, &[]).map_err(err)
+pub async fn get_status(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let (_, config) = current_workspace(&state)?;
+    tauri::async_runtime::spawn_blocking(move || status::balances(&config, &[]).map_err(err))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
 pub fn list_rules_files(state: tauri::State<AppState>) -> Result<Vec<FileEntry>, String> {
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().ok_or("No workspace loaded")?;
-    let mut files = std::fs::read_dir(&ws.config.rules_dir)
+    let (_, config) = current_workspace(&state)?;
+    let mut files = std::fs::read_dir(&config.rules_dir)
         .map_err(|e| err(e.into()))?
         .filter_map(|e| e.ok())
         .map(|e| e.path())
@@ -332,17 +374,16 @@ pub fn open_path(path: String, state: tauri::State<AppState>) -> Result<(), Stri
     // inside the loaded workspace (config, journal, data dirs). open_path
     // launches files with their default application, so an unrestricted
     // path would be arbitrary program execution.
-    let ws = state.workspace.lock().unwrap();
-    let ws = ws.as_ref().ok_or("No workspace loaded")?;
+    let (config_path, config) = current_workspace(&state)?;
     let target = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
     let mut roots = vec![
-        ws.config_path.clone(),
-        ws.config.journal.clone(),
-        ws.config.in_dir.clone(),
-        ws.config.staging_dir.clone(),
-        ws.config.rules_dir.clone(),
+        config_path.clone(),
+        config.journal.clone(),
+        config.in_dir.clone(),
+        config.staging_dir.clone(),
+        config.rules_dir.clone(),
     ];
-    if let Some(parent) = ws.config_path.parent() {
+    if let Some(parent) = config_path.parent() {
         roots.push(parent.to_path_buf());
     }
     let allowed = roots.iter().any(|root| {
