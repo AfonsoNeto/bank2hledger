@@ -181,7 +181,12 @@ fn workspace_info(
 fn remember_workspace(config_path: &Path) {
     if let Some(file) = remembered_path_file() {
         if std::fs::create_dir_all(file.parent().unwrap_or(Path::new("."))).is_ok() {
-            let _ = std::fs::write(&file, config_path.display().to_string());
+            // Same guard as the core's user-data writes: don't follow a
+            // symlink planted at the state file's path.
+            let _ = bank2hledger::fs_guard::write_refusing_symlinks(
+                &file,
+                config_path.display().to_string().as_bytes(),
+            );
         }
     }
 }
