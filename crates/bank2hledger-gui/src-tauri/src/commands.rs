@@ -327,6 +327,31 @@ pub fn list_rules_files(state: tauri::State<AppState>) -> Result<Vec<FileEntry>,
 }
 
 #[tauri::command]
-pub fn open_path(path: String) -> Result<(), String> {
+pub fn open_path(path: String, state: tauri::State<AppState>) -> Result<(), String> {
+    // Defense in depth against a compromised renderer: only open paths
+    // inside the loaded workspace (config, journal, data dirs). open_path
+    // launches files with their default application, so an unrestricted
+    // path would be arbitrary program execution.
+    let ws = state.workspace.lock().unwrap();
+    let ws = ws.as_ref().ok_or("No workspace loaded")?;
+    let target = std::fs::canonicalize(&path).map_err(|e| e.to_string())?;
+    let mut roots = vec![
+        ws.config_path.clone(),
+        ws.config.journal.clone(),
+        ws.config.in_dir.clone(),
+        ws.config.staging_dir.clone(),
+        ws.config.rules_dir.clone(),
+    ];
+    if let Some(parent) = ws.config_path.parent() {
+        roots.push(parent.to_path_buf());
+    }
+    let allowed = roots.iter().any(|root| {
+        std::fs::canonicalize(root)
+            .map(|r| target == r || target.starts_with(&r))
+            .unwrap_or(false)
+    });
+    if !allowed {
+        return Err(format!("path is outside the loaded workspace: {path}"));
+    }
     tauri_plugin_opener::open_path(&path, None::<&str>).map_err(|e| e.to_string())
 }
