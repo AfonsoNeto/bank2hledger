@@ -6,6 +6,13 @@
   "permissions": [
     "core:default",
     "dialog:default",
-    "opener:default"
+    {
+      "identifier": "opener:allow-open-url",
+      "description": "Allow opening the project documentation URLs only",
+      "allow": [
+        { "url": "https://github.com/AfonsoNeto/bank2hledger*" },
+        { "url": "https://hledger.org*" }
+      ]
+    }
   ]
 }
