@@ -1,13 +1,16 @@
 import { invoke } from "@tauri-apps/api/core";
 import * as mock from "./mock";
 
-// When the Tauri IPC bridge is absent (plain `npm run dev` in a browser),
-// fall back to the synthetic mock in mock.ts so the UI can be developed and
-// screenshotted without the Rust backend.
+// In dev builds without the Tauri IPC bridge (plain `npm run dev` in a
+// browser), fall back to the synthetic mock in mock.ts so the UI can be
+// developed and screenshotted without the Rust backend. Release builds
+// never touch it: import.meta.env.DEV is statically false there, so the
+// mock code is tree-shaken out entirely.
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+const useMock = import.meta.env.DEV && !inTauri;
 
 function call<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
-  if (!inTauri) {
+  if (useMock) {
     return mock.handle(cmd, args) as Promise<T>;
   }
   return invoke<T>(cmd, args);
