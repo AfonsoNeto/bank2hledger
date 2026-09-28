@@ -28,8 +28,10 @@ jobs:
         run: cargo build -p bank2hledger --no-default-features
       - name: No-telemetry smoke check
         run: |
-          # The binary must not link any telemetry-ish crates: assert none in the tree.
+          # The binaries must not link any telemetry-ish crates: assert none in the
+          # trees (core offline build and the GUI's full dependency tree).
           cargo tree --no-default-features | grep -iE "sentry|analytics|mixpanel|posthog|amplitude" && exit 1 || true
+          cargo tree -p bank2hledger-gui | grep -iE "sentry|analytics|mixpanel|posthog|amplitude" && exit 1 || true
 
   test-windows:
     # Windows is build- and test-verified; the GUI ships only for Windows,
