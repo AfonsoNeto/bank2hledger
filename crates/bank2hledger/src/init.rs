@@ -11,6 +11,7 @@ use anyhow::{bail, Result};
 use crate::{config, rules};
 
 /// What `init` created, for callers to present.
+#[derive(Debug)]
 pub struct InitReport {
     pub config_path: PathBuf,
     /// Configured data directories (in, staging, rules) — only present when
@@ -35,7 +36,9 @@ pub fn run(explicit: Option<&Path>, force: bool) -> Result<InitReport> {
             path.display()
         );
     }
-    std::fs::write(&path, config::Config::template())?;
+    // Same guard as the rules files: a symlink planted at the config path
+    // (shared/synced directory) must not redirect the write.
+    crate::fs_guard::write_refusing_symlinks(&path, config::Config::template().as_bytes())?;
 
     // If the config parses and has accounts, create directories and starter
     // rules files. (The template has everything commented out, so a fresh
@@ -66,4 +69,26 @@ pub fn run(explicit: Option<&Path>, force: bool) -> Result<InitReport> {
             "Next: edit the config — uncomment and fill in your [[accounts]] entries.".to_string();
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn init_refuses_to_write_through_a_planted_symlink() {
+        let dir = tempfile::tempdir().unwrap();
+        let victim = dir.path().join("victim.txt");
+        std::fs::write(&victim, b"innocent").unwrap();
+        let link = dir.path().join("bank2hledger.toml");
+        std::os::unix::fs::symlink(&victim, &link).unwrap();
+
+        // Without --force, init refuses because the path already exists —
+        // the guard matters for the `--force` overwrite path.
+        let err = run(Some(&link), true).unwrap_err().to_string();
+        assert!(err.contains("symlink"), "{err}");
+        // The symlink target is untouched.
+        assert_eq!(std::fs::read(&victim).unwrap(), b"innocent");
+    }
 }
