@@ -91,7 +91,18 @@ pub fn load(key: &str) -> Result<Option<String>> {
         Ok(e) => match e.get_password() {
             Ok(s) => Ok(Some(s)),
             Err(keyring::Error::NoEntry) => load_fallback(key),
-            Err(e) => Err(anyhow::Error::new(e).context("reading secret from keychain")),
+            // The keychain service itself is broken/unavailable (e.g. no
+            // Secret Service daemon on a headless Linux box). `store` falls
+            // back to the file in that situation, so `load` must too —
+            // otherwise secrets written to the fallback could never be read
+            // back. Mirrors store()'s fallback-with-warning behavior.
+            Err(e) => {
+                eprintln!(
+                    "warning: OS keychain unavailable ({}), reading secret from the 0600 fallback file",
+                    redact(&e.to_string())
+                );
+                load_fallback(key)
+            }
         },
         Err(_) => load_fallback(key),
     }
