@@ -73,6 +73,9 @@ pub fn run(explicit: Option<&Path>, force: bool) -> Result<InitReport> {
 
 #[cfg(test)]
 mod tests {
+    // The only test here exercises the symlink guard, which is unix-only;
+    // gating the import too keeps Windows clippy free of an unused import.
+    #[cfg(unix)]
     use super::*;
 
     #[cfg(unix)]
