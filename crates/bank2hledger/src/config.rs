@@ -339,12 +339,24 @@ mod tests {
     #[test]
     fn absolute_paths_are_preserved() {
         let dir = tempfile::tempdir().unwrap();
-        let body = "journal = \"/tmp/somewhere/j.journal\"\n\
-                    in_dir = \"/tmp/somewhere/in\"\n[[accounts]]\nname = \"a\"\n\
-                    profile = \"monzo_csv\"\nhledger_account = \"assets:a\"\n";
-        let cfg = Config::load(&write_config(dir.path(), body)).unwrap();
-        assert_eq!(cfg.journal, PathBuf::from("/tmp/somewhere/j.journal"));
-        assert_eq!(cfg.in_dir, PathBuf::from("/tmp/somewhere/in"));
+        // Platform-absolute paths: "/tmp"-style strings are NOT absolute on
+        // Windows (no drive prefix), so is_absolute() is false there and the
+        // resolver would join them onto the config dir. temp_dir() is a true
+        // absolute path on every platform.
+        let abs_base = std::env::temp_dir().join("bank2hledger-abs-test");
+        let journal = abs_base.join("j.journal");
+        let in_dir = abs_base.join("in");
+        // TOML literal strings ('...') keep Windows backslashes unescaped.
+        let body = format!(
+            "journal = '{}'\n\
+             in_dir = '{}'\n[[accounts]]\nname = \"a\"\n\
+             profile = \"monzo_csv\"\nhledger_account = \"assets:a\"\n",
+            journal.display(),
+            in_dir.display()
+        );
+        let cfg = Config::load(&write_config(dir.path(), &body)).unwrap();
+        assert_eq!(cfg.journal, journal);
+        assert_eq!(cfg.in_dir, in_dir);
     }
 
     #[test]
