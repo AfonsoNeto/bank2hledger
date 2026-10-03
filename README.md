@@ -66,7 +66,7 @@ You can — bank2hledger builds on it. What it adds:
 | Bank     | Export profile | API fetcher | Notes |
 |----------|----------------|-------------|-------|
 | Monzo    | `monzo_csv`    | ✅ `monzo`   | fetcher uses the official API (OAuth, read-only) |
-| Revolut  | `revolut_xls`  | —           | no official personal API; an unofficial fetcher is on the roadmap |
+| Revolut  | `revolut_xls` or `revolut_csv` | — | no official personal API; an unofficial fetcher is on the roadmap |
 | Wise     | `wise_csv`     | ✅ `wise`    | fetcher uses personal API tokens (full-access; not scoping-able) |
 | Aqua (NewDay) | `aqua_pdf` | —          | monthly PDF statement → `pdftotext`; no CSV export exists |
 | *any bank* | `generic_csv` | —          | describe your bank's CSV in config; no code needed |
