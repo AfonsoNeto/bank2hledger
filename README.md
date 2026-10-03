@@ -24,6 +24,20 @@ $ bank2hledger status               # balances, to compare with the bank app
 $ git commit                        # your approval
 ```
 
+## Resolving duplicates interactively
+
+The first import against a journal with hand-entered history is where duplicates hide — you logged the pending £1350 rent, the statement settles it days later at £1347.50 under the bank's own wording. `import -i` stops at each of those:
+
+```
+Possible duplicate detected:
+  new: 2026-09-03 BIG LANDLORD LTD -1347.50GBP
+? Already in your journal? Pick the match, or 'None' to import anyway
+  ❯ 2026-09-01 Big Landlord -1350.00GBP  (score 0.83: amount 0.95, date 0.80, payee 0.67, category 1.00)
+    None — import the new transaction as it is
+```
+
+Arrow keys move between every above-threshold match, **Enter** declares the staged row a duplicate of the selected entry (skipped, and recorded as resolved — never offered again), and picking `None` (or **Esc**) imports the row unchanged. **Ctrl-C** aborts the whole import before anything is written. Use `-i --dry-run` to rehearse; the summary line reports how many rows were skipped as duplicates.
+
 ## The Windows GUI
 
 The same review-before-you-approve workflow, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark). Drop exports in, preview what's new, import, verify:
@@ -42,7 +56,7 @@ You can — bank2hledger builds on it. What it adds:
 
 - **Account binding by file name.** Exports are matched to your configured accounts by filename (`monzo-personal-*.csv`), so multi-account setups never mis-assign transactions. There is no guessing.
 - **Exact duplicate detection.** Bank transaction ids (where exports provide them) are tracked in a seen-file, so two identical coffees on the same day both survive — plain hledger dedup would silently drop one.
-- **Overlap detection against hand-entered history.** The tool's dedup can't know about transactions you logged manually before using it. `import --dry-run` therefore also scores each staged row against existing journal entries — date proximity, amount within a small tolerance (FX/fee drift), fuzzy payee similarity, and counter-account agreement — and flags likely duplicates with a score breakdown. Advisory only: nothing is dropped automatically. Run with `--interactive` to decide each flag at import time: an arrow-key menu lists every match and `None — import as it is`; skipped rows are recorded as resolved and never re-offered.
+- **Overlap detection against hand-entered history.** The tool's dedup can't know about transactions you logged manually before using it. `import --dry-run` therefore also scores each staged row against existing journal entries — date proximity, amount within a small tolerance (FX/fee drift), fuzzy payee similarity, and counter-account agreement — and flags likely duplicates with a score breakdown. Advisory only: nothing is dropped automatically. Run with `--interactive` / `-i` to decide each flag at import time: an arrow-key menu lists every match plus `None — import as it is`; skipped rows are recorded as resolved and never re-offered.
 - **Starter rules per account.** `init` generates a standard hledger CSV-rules file per account with a catch-all to `expenses:other`; you edit plain hledger syntax, the tool never rewrites it. Unmatched payees are visible in every import for review; each fix makes every future import smarter.
 - **A balance checkpoint.** `status` prints the balances of exactly the accounts you import for, so comparing against the bank app is one glance.
 - **API fetchers (optional).** Monzo and Wise fetchers write real exports into your drop zone automatically; the rest of the pipeline doesn't know or care.
@@ -101,7 +115,7 @@ $ bank2hledger fetch
 1. **Get data in**: drop exports into `in/`, or run `fetch`.
 2. **Preview**: `bank2hledger import --dry-run` — shows exactly the batch that would be added.
 3. **Categorize**: unmatched payees land in `expenses:other`; add a mapping to the account's rules file (`rules/<account>.rules`) and re-run. Mappings are plain hledger regexes, matched case-insensitively; *later rules win*, so the catch-all sits first and specific blocks after it.
-4. **Import**: `bank2hledger import` — appends only new transactions; re-running or re-dropping files can never duplicate.
+4. **Import**: `bank2hledger import -i` — appends only new transactions; re-running or re-dropping files can never duplicate. `-i`/`--interactive` pauses at every possible duplicate (see above) and lets you decide with the arrow keys; without it, duplicates are only flagged for review.
 5. **Verify**: `bank2hledger status` — compare against the real balances in your bank apps.
 6. **Approve**: `git commit`. To reject a batch: `git checkout -- 2026.journal`, fix the rules, re-run.
 
