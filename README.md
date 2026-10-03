@@ -42,6 +42,7 @@ You can — bank2hledger builds on it. What it adds:
 
 - **Account binding by file name.** Exports are matched to your configured accounts by filename (`monzo-personal-*.csv`), so multi-account setups never mis-assign transactions. There is no guessing.
 - **Exact duplicate detection.** Bank transaction ids (where exports provide them) are tracked in a seen-file, so two identical coffees on the same day both survive — plain hledger dedup would silently drop one.
+- **Overlap detection against hand-entered history.** The tool's dedup can't know about transactions you logged manually before using it. `import --dry-run` therefore also scores each staged row against existing journal entries — date proximity, amount within a small tolerance (FX/fee drift), fuzzy payee similarity, and counter-account agreement — and flags likely duplicates with a score breakdown. Advisory only: nothing is dropped automatically.
 - **Starter rules per account.** `init` generates a standard hledger CSV-rules file per account with a catch-all to `expenses:other`; you edit plain hledger syntax, the tool never rewrites it. Unmatched payees are visible in every import for review; each fix makes every future import smarter.
 - **A balance checkpoint.** `status` prints the balances of exactly the accounts you import for, so comparing against the bank app is one glance.
 - **API fetchers (optional).** Monzo and Wise fetchers write real exports into your drop zone automatically; the rest of the pipeline doesn't know or care.
