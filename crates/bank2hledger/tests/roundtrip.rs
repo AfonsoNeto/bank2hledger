@@ -91,12 +91,9 @@ fn parses_aqua_fixture() {
         .find(|t| t.payee.contains("CORNER GROCER"))
         .unwrap();
     assert_eq!(groceries.amount, Decimal::from_str_exact("-12.40").unwrap());
-    // …and the payment is positive (it reduces the debt).
-    let payment = txs
-        .iter()
-        .find(|t| t.payee.contains("PAYMENT RECEIVED"))
-        .unwrap();
-    assert_eq!(payment.amount, Decimal::from_str_exact("120.00").unwrap());
+    // …and payment rows are skipped entirely: the paying bank's own import
+    // already posts them to the liability account.
+    assert!(!txs.iter().any(|t| t.payee.contains("PAYMENT RECEIVED")));
 }
 
 fn which_pdftotext() -> Option<PathBuf> {

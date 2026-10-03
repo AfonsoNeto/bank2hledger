@@ -46,6 +46,18 @@ pub(crate) fn parse_text(account: &AccountConfig, text: &str) -> Result<Vec<Tran
             skipped += 1;
             continue;
         };
+        // Card payments received are redundant: they are already captured by
+        // the paying bank's own import (routed to liabilities:credit_cards:aqua
+        // via that account's rules). Importing them again would double-reduce
+        // the debt and book a phantom expense. Refunds are NOT payments — they
+        // have no bank-side counterpart and must still be imported.
+        let desc = caps["desc"].trim();
+        let lower = desc.to_ascii_lowercase();
+        if lower.contains("payment") && (lower.contains("thank you") || lower.contains("received"))
+        {
+            skipped += 1;
+            continue;
+        }
         let day: u32 = caps["day"].parse().context("bad day")?;
         let mon = month_index(&caps["mon"])?;
         // Statements show dates without a year; assume the statement covers
@@ -61,7 +73,7 @@ pub(crate) fn parse_text(account: &AccountConfig, text: &str) -> Result<Vec<Tran
         let amount = -amount;
         txs.push(Transaction {
             date,
-            payee: caps["desc"].trim().to_string(),
+            payee: desc.to_string(),
             amount,
             currency: "GBP".to_string(),
             account: account.hledger_account.clone(),
@@ -171,7 +183,8 @@ For queries call the number on the back of your card.
 
     #[test]
     fn parses_all_transaction_rows_and_skips_header_footer() {
-        assert_eq!(txs().len(), 7);
+        // 7 rows minus the payment row, which is deliberately skipped.
+        assert_eq!(txs().len(), 6);
     }
 
     #[test]
@@ -186,12 +199,34 @@ For queries call the number on the back of your card.
     }
 
     #[test]
-    fn payments_and_credits_are_positive() {
-        let t = txs()
-            .into_iter()
-            .find(|t| t.payee.contains("PAYMENT RECEIVED"))
-            .unwrap();
-        assert_eq!(t.amount, Decimal::from_str_exact("120.00").unwrap());
+    fn payments_received_are_skipped_not_imported() {
+        // The paying bank's own import already posts the payment to the
+        // liability account; importing the statement's payment row too would
+        // double-reduce the debt and book a phantom expense.
+        assert!(!txs().iter().any(|t| t.payee.contains("PAYMENT RECEIVED")));
+    }
+
+    #[test]
+    fn merchant_names_containing_payment_are_not_skipped() {
+        let t = parse_text(
+            &acct(),
+            "01 MAY  SWAN ENERGY PAYMENTS LTD      45.00        890.00\n",
+        )
+        .unwrap();
+        assert_eq!(t.len(), 1);
+        assert_eq!(t[0].payee, "SWAN ENERGY PAYMENTS LTD");
+    }
+
+    #[test]
+    fn refunds_are_still_imported() {
+        // Refunds have no bank-side counterpart; only payment rows are skipped.
+        let t = parse_text(
+            &acct(),
+            "02 MAY  REFUND - BROKEN GOODS    -25.00        820.40\n",
+        )
+        .unwrap();
+        assert_eq!(t[0].payee, "REFUND - BROKEN GOODS");
+        assert_eq!(t[0].amount, Decimal::from_str_exact("25.00").unwrap());
     }
 
     #[test]
