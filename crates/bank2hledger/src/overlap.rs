@@ -46,6 +46,11 @@ pub struct Params {
     /// Category agreement that counts as an identifying signal (top-level +
     /// leaf match = 0.5, exact = 1.0).
     pub min_category_signal: f64,
+    /// When a pair is flagged *only* via the transfer signal (no payee or
+    /// category agreement), require at least this composite score — the
+    /// transfer interpretation is weaker, so near-exact amount and date are
+    /// demanded (0.5 ≈ amount and date both ~exact).
+    pub min_transfer_score: f64,
     pub weight_amount: f64,
     pub weight_date: f64,
     pub weight_payee: f64,
@@ -59,6 +64,7 @@ impl Default for Params {
             amount_tolerance: 0.05,
             min_payee_signal: 1.0 / 3.0,
             min_category_signal: 0.5,
+            min_transfer_score: 0.5,
             weight_amount: 0.35,
             weight_date: 0.25,
             weight_payee: 0.25,
@@ -281,8 +287,20 @@ pub fn find_overlaps(
 
 /// Score one pair; `Some` when both hard gates pass and the composite score
 /// reaches the threshold.
+/// Normalize commodity symbols so journal-side spellings (£, €) compare
+/// equal to the ISO codes the CSV imports use (GBP, EUR).
+fn normalize_commodity(c: &str) -> &str {
+    match c {
+        "£" => "GBP",
+        "€" => "EUR",
+        "$" | "US$" => "USD",
+        "¥" => "JPY",
+        other => other,
+    }
+}
+
 fn score_pair(staged: &Tx, staged_key: &str, existing: &Tx, params: &Params) -> Option<Warning> {
-    if staged.currency != existing.currency {
+    if normalize_commodity(&staged.currency) != normalize_commodity(&existing.currency) {
         return None;
     }
     let day_diff =
@@ -318,17 +336,23 @@ fn score_pair(staged: &Tx, staged_key: &str, existing: &Tx, params: &Params) -> 
         .counter_accounts
         .iter()
         .any(|a| is_money_account(a));
-    if !existing_is_transfer
-        && score_payee < params.min_payee_signal
-        && score_category < params.min_category_signal
-    {
-        return None;
-    }
-
+    let has_identifying_signal =
+        score_payee >= params.min_payee_signal || score_category >= params.min_category_signal;
     let score = params.weight_amount * score_amount
         + params.weight_date * score_date
         + params.weight_payee * score_payee
         + params.weight_category * score_category;
+
+    if !has_identifying_signal {
+        if !existing_is_transfer {
+            return None;
+        }
+        // Transfer interpretation only: without any identifying signal the
+        // match is weaker, so demand a near-exact amount and date.
+        if score < params.min_transfer_score {
+            return None;
+        }
+    }
     Some(Warning {
         staged: staged.clone(),
         staged_key: staged_key.to_string(),
@@ -539,6 +563,30 @@ mod tests {
         let a = tx(d(2026, 9, 1), "X", "-10.00", &["expenses:other"]);
         let mut b = tx(d(2026, 9, 1), "X", "-10.00", &["expenses:other"]);
         b.currency = "EUR".into();
+        assert!(score_pair(&a, "k", &b, &params()).is_none());
+    }
+
+    #[test]
+    fn commodity_symbols_match_iso_codes() {
+        // Journals hand-entered with £ symbols must compare equal to the
+        // GBP commodity the CSV imports carry.
+        let a = tx(
+            d(2026, 9, 1),
+            "Octopus Energy",
+            "-149.98",
+            &["expenses:electricity_and_gas"],
+        );
+        let mut b = tx(
+            d(2026, 9, 2),
+            "Octopus Energy",
+            "-149.98",
+            &["expenses:electricity_and_gas"],
+        );
+        b.currency = "£".into();
+        let w = score_pair(&a, "k", &b, &params()).unwrap();
+        assert!(w.score > 0.9, "{}", w.score);
+        // ...while genuinely different currencies still never match.
+        b.currency = "€".into();
         assert!(score_pair(&a, "k", &b, &params()).is_none());
     }
 
