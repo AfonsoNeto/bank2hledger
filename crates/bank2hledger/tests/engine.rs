@@ -588,9 +588,195 @@ fn overlap_detection_flags_near_duplicates_not_new_transactions() {
     let outcomes = engine::run(&rig.config, &[], true, None).unwrap();
     assert_eq!(outcomes[0].warnings.len(), 1, "{:#?}", outcomes[0].warnings);
     let w = &outcomes[0].warnings[0];
-    assert!(w.summary().contains("BIG LANDLORD LTD"), "{}", w.summary());
-    assert!(w.summary().contains("Big Landlord"), "{}", w.summary());
+    assert!(!w.matches.is_empty());
+    let best = w.matches[0].summary();
+    assert!(best.contains("BIG LANDLORD LTD"), "{}", best);
+    assert!(best.contains("Big Landlord"), "{}", best);
     // The same-priced new payee is not flagged: different category and no
     // token overlap with anything in the journal.
     assert!(!w.staged.payee.contains("LAPTOP"));
+}
+
+/// Interactive mode: the decider is consulted per flagged row; a "skip"
+/// decision excludes the row from the batch (and records it as resolved),
+/// while unflagged rows import untouched.
+#[test]
+fn interactive_decisions_skip_and_record() {
+    if !skip_or_panic() {
+        return;
+    }
+    let rig = rig(vec![acct(
+        "test-acct",
+        "monzo_csv",
+        "assets:banks:monzo:personal",
+    )]);
+    // Two hand-logged entries the export will collide with.
+    std::fs::write(
+        &rig.config.journal,
+        "2026-09-01 Big Landlord\n    assets:banks:monzo:personal      GBP-1350.00\n    expenses:home:rent                GBP1350.00\n2026-09-02 Stream Service\n    assets:banks:monzo:personal      GBP-9.99\n    expenses:subscriptions:entertainment  GBP9.99\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(&rig.rules_dir).unwrap();
+    std::fs::write(
+        rig.rules_dir.join("test-acct.rules"),
+        "fields date, description, amount, currency, id\n\
+         date-format %Y-%m-%d\n\
+         currency %currency\n\
+         account1 assets:banks:monzo:personal\n\
+         comment bank2hledger-id:%id\n\
+         account2 expenses:other\n",
+    )
+    .unwrap();
+    std::fs::write(
+        rig.in_dir.join("test-acct.csv"),
+        format!(
+            "{MONZO_HEADER}{}{}{}",
+            monzo_row("tx_rent", "03/09/2026", "BIG LANDLORD LTD", "-1347.50"),
+            monzo_row("tx_stream", "03/09/2026", "STREAM SERVICE LTD", "-9.99"),
+            monzo_row("tx_new", "03/09/2026", "LAPTOP WAREHOUSE", "-1350.00"),
+        ),
+    )
+    .unwrap();
+
+    let mut prompted: Vec<String> = Vec::new();
+    let mut calls = 0;
+    {
+        let mut decider = |row: &bank2hledger::overlap::RowMatches| -> anyhow::Result<bool> {
+            calls += 1;
+            prompted.push(row.staged.payee.clone());
+            // Skip the first flagged row as a duplicate, keep the rest.
+            Ok(calls > 1)
+        };
+        let outcomes =
+            engine::run_interactive(&rig.config, &[], false, None, &mut decider).unwrap();
+        assert_eq!(outcomes[0].skipped_as_duplicates, 1);
+    }
+
+    // Two rows were flagged and prompted, in chronological order.
+    assert_eq!(calls, 2);
+    assert_eq!(prompted[0], "BIG LANDLORD LTD");
+    assert_eq!(prompted[1], "STREAM SERVICE LTD");
+
+    // The skipped row is not in the journal; the other two are.
+    let text = std::fs::read_to_string(&rig.config.journal).unwrap();
+    assert!(!text.contains("bank2hledger-id:tx_rent"), "{text}");
+    assert!(text.contains("bank2hledger-id:tx_stream"));
+    assert!(text.contains("bank2hledger-id:tx_new"));
+    assert_eq!(
+        text.lines().filter(|l| l.starts_with("20")).count(),
+        4,
+        "2 hand-logged + 2 imported"
+    );
+
+    // The skipped row is recorded as resolved: re-running offers nothing new.
+    let outcomes = engine::run(&rig.config, &[], false, None).unwrap();
+    assert_eq!(outcomes[0].new_count, 0);
+    assert_eq!(outcomes[0].already_seen, 3);
+}
+
+/// An "import as-is" decision imports the flagged row like any other.
+#[test]
+fn interactive_decision_to_keep_imports_the_row() {
+    if !skip_or_panic() {
+        return;
+    }
+    let rig = rig(vec![acct(
+        "test-acct",
+        "monzo_csv",
+        "assets:banks:monzo:personal",
+    )]);
+    std::fs::write(
+        &rig.config.journal,
+        "2026-09-01 Big Landlord\n    assets:banks:monzo:personal      GBP-1350.00\n    expenses:home:rent                GBP1350.00\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(&rig.rules_dir).unwrap();
+    std::fs::write(
+        rig.rules_dir.join("test-acct.rules"),
+        "fields date, description, amount, currency, id\n\
+         date-format %Y-%m-%d\n\
+         currency %currency\n\
+         account1 assets:banks:monzo:personal\n\
+         comment bank2hledger-id:%id\n\
+         account2 expenses:other\n",
+    )
+    .unwrap();
+    std::fs::write(
+        rig.in_dir.join("test-acct.csv"),
+        format!(
+            "{MONZO_HEADER}{}",
+            monzo_row("tx_rent", "03/09/2026", "BIG LANDLORD LTD", "-1347.50"),
+        ),
+    )
+    .unwrap();
+
+    let mut calls = 0;
+    {
+        let mut decider = |_: &bank2hledger::overlap::RowMatches| -> anyhow::Result<bool> {
+            calls += 1;
+            Ok(true) // "None — import as it is"
+        };
+        let outcomes =
+            engine::run_interactive(&rig.config, &[], false, None, &mut decider).unwrap();
+        assert_eq!(calls, 1);
+        assert_eq!(outcomes[0].skipped_as_duplicates, 0);
+    }
+    let text = std::fs::read_to_string(&rig.config.journal).unwrap();
+    assert!(text.contains("bank2hledger-id:tx_rent"));
+}
+
+/// Interactive dry-run: decisions shape the preview, nothing is written and
+/// the seen-state is untouched.
+#[test]
+fn interactive_dry_run_decides_without_writing() {
+    if !skip_or_panic() {
+        return;
+    }
+    let rig = rig(vec![acct(
+        "test-acct",
+        "monzo_csv",
+        "assets:banks:monzo:personal",
+    )]);
+    std::fs::write(
+        &rig.config.journal,
+        "2026-09-01 Big Landlord\n    assets:banks:monzo:personal      GBP-1350.00\n    expenses:home:rent                GBP1350.00\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(&rig.rules_dir).unwrap();
+    std::fs::write(
+        rig.rules_dir.join("test-acct.rules"),
+        "fields date, description, amount, currency, id\n\
+         date-format %Y-%m-%d\n\
+         currency %currency\n\
+         account1 assets:banks:monzo:personal\n\
+         comment bank2hledger-id:%id\n\
+         account2 expenses:other\n",
+    )
+    .unwrap();
+    std::fs::write(
+        rig.in_dir.join("test-acct.csv"),
+        format!(
+            "{MONZO_HEADER}{}",
+            monzo_row("tx_rent", "03/09/2026", "BIG LANDLORD LTD", "-1347.50"),
+        ),
+    )
+    .unwrap();
+
+    let mut decider = |_: &bank2hledger::overlap::RowMatches| -> anyhow::Result<bool> {
+        Ok(false) // skip as duplicate
+    };
+    let outcomes = engine::run_interactive(&rig.config, &[], true, None, &mut decider).unwrap();
+    assert_eq!(outcomes[0].skipped_as_duplicates, 1);
+    assert_eq!(
+        std::fs::read_to_string(&rig.config.journal)
+            .unwrap()
+            .lines()
+            .filter(|l| l.starts_with("20"))
+            .count(),
+        1
+    );
+    assert!(
+        !rig.staging.join("test-acct.seen").exists(),
+        "dry run records nothing"
+    );
 }

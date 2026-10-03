@@ -25,6 +25,20 @@ fn run() -> Result<()> {
         } => {
             let config = load_config(cli.config.as_deref())?;
             status::require_journal(&config.journal)?;
+            #[cfg(feature = "interactive")]
+            let outcomes = {
+                if interactive {
+                    use std::io::IsTerminal;
+                    if !std::io::stdin().is_terminal() {
+                        bail!("--interactive needs a real terminal for arrow-key selection");
+                    }
+                    let mut decider: engine::DecisionFn = |row| choose_duplicate(row);
+                    engine::run_interactive(&config, &account, dry_run, since, &mut decider)?
+                } else {
+                    engine::run(&config, &account, dry_run, since)?
+                }
+            };
+            #[cfg(not(feature = "interactive"))]
             let outcomes = engine::run(&config, &account, dry_run, since)?;
             let mut total_new = 0;
             for o in &outcomes {
@@ -33,8 +47,15 @@ fn run() -> Result<()> {
                     (_, Some(preview)) => {
                         total_new += o.new_count;
                         println!(
-                            "{}: {} new transaction(s) ({} already imported)",
-                            o.account, o.new_count, o.already_seen
+                            "{}: {} new transaction(s) ({} already imported){}",
+                            o.account,
+                            o.new_count,
+                            o.already_seen,
+                            if o.skipped_as_duplicates > 0 {
+                                format!(", {} skipped as duplicates", o.skipped_as_duplicates)
+                            } else {
+                                String::new()
+                            }
                         );
                         if dry_run {
                             println!("--- would be added ---\n{}", preview.trim_end());
@@ -45,14 +66,17 @@ fn run() -> Result<()> {
                         println!("{}: {} new transaction(s)", o.account, o.new_count);
                     }
                 }
-                if !o.warnings.is_empty() {
+                #[cfg(feature = "interactive")]
+                if o.skipped_as_duplicates == 0 && !o.warnings.is_empty() {
                     println!(
                         "  ⚠ {} possible duplicate(s) against existing journal entries \
-                         (advisory — review before approving; not dropped):",
+                         (advisory — re-run with --interactive to decide):",
                         o.warnings.len()
                     );
-                    for w in &o.warnings {
-                        println!("    {}", w.summary());
+                    for row in &o.warnings {
+                        if let Some(best) = row.matches.first() {
+                            println!("    {}", best.summary());
+                        }
                     }
                 }
             }
@@ -93,6 +117,35 @@ fn run() -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// Interactive duplicate chooser (arrow keys): pick an existing entry to
+/// declare the staged row a duplicate of it, or "None" to import as-is.
+#[cfg(feature = "interactive")]
+fn choose_duplicate(row: &bank2hledger::overlap::RowMatches) -> anyhow::Result<bool> {
+    use dialoguer::{ColorfulTheme, Select};
+
+    println!("\nPossible duplicate detected:");
+    println!(
+        "  new: {} {} {}{}",
+        row.staged.date,
+        row.staged.payee,
+        row.staged.amount.normalize(),
+        row.staged.currency
+    );
+    let mut items: Vec<String> = row.matches.iter().map(|w| w.candidate_line()).collect();
+    items.push("None — import the new transaction as it is".to_string());
+    let none_index = items.len() - 1;
+
+    let selection = Select::with_theme(&ColorfulTheme::default())
+        .with_prompt("Already in your journal? Pick the match, or 'None' to import anyway")
+        .items(&items)
+        .default(none_index)
+        .interact_opt()
+        .context("interactive selection failed")?;
+
+    // Esc counts as "None"; Ctrl-C aborts the import before anything is written.
+    Ok(!matches!(selection, Some(i) if i < none_index))
 }
 
 #[cfg(feature = "fetch")]

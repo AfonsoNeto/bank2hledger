@@ -29,10 +29,12 @@ keyring = { version = "3", features = ["sync-secret-service", "windows-native", 
 open = { version = "5", optional = true }
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"], optional = true }
 rpassword = { version = "7", optional = true }
+dialoguer = { version = "0.11", optional = true }
 
 [features]
 default = ["fetch"]
 fetch = ["dep:keyring", "dep:open", "dep:reqwest", "dep:rpassword"]
+interactive = ["dep:dialoguer"]
 
 [dev-dependencies]
 tempfile = "3"

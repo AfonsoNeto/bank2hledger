@@ -22,27 +22,61 @@ use crate::rules;
 #[derive(Debug)]
 pub struct ImportOutcome {
     pub account: String,
+    /// Rows offered for import this run (before interactive skips).
     pub new_count: usize,
     pub already_seen: usize,
-    /// Journal-format preview of the transactions that would be added.
+    /// Rows the user resolved as duplicates of existing journal entries
+    /// during an interactive run. Zero otherwise.
+    pub skipped_as_duplicates: usize,
+    /// Journal-format preview of the transactions that would be added
+    /// (reflecting interactive skips, if any).
     pub preview: Option<String>,
-    /// Staged rows that look like transactions already in the journal
-    /// (advisory — see the `overlap` module). Never populated for batches
-    /// with no new rows.
-    pub warnings: Vec<overlap::Warning>,
+    /// Staged rows that look like transactions already in the journal —
+    /// one entry per flagged row, candidates best-first (see `overlap`).
+    pub warnings: Vec<overlap::RowMatches>,
 }
+
+/// A decision callback for [`run_interactive`]: given a staged row with
+/// above-threshold overlap matches, return `Ok(true)` to import it as-is,
+/// `Ok(false)` to skip it as a duplicate of an existing entry. Returning
+/// `Err` aborts the whole import before anything is written.
+pub type DecisionFn<'a> = dyn FnMut(&overlap::RowMatches) -> Result<bool> + 'a;
 
 pub fn hledger_cmd() -> Command {
     Command::new(std::env::var("HLEDGER").unwrap_or_else(|_| "hledger".into()))
 }
 
 /// Import (or preview) new transactions for all configured accounts, or the
-/// given subset.
+/// given subset. Non-interactive: overlap matches are reported, never acted on.
 pub fn run(
     config: &Config,
     accounts: &[String],
     dry_run: bool,
     since: Option<NaiveDate>,
+) -> Result<Vec<ImportOutcome>> {
+    run_inner(config, accounts, dry_run, since, None)
+}
+
+/// Like [`run`], but pauses on every flagged row and asks `decider` whether
+/// to import it as-is (`true`) or skip it as a duplicate (`false`). Skipped
+/// rows are recorded as resolved (never re-offered) and excluded from the
+/// batch written to the journal.
+pub fn run_interactive(
+    config: &Config,
+    accounts: &[String],
+    dry_run: bool,
+    since: Option<NaiveDate>,
+    decider: &mut DecisionFn,
+) -> Result<Vec<ImportOutcome>> {
+    run_inner(config, accounts, dry_run, since, Some(decider))
+}
+
+fn run_inner(
+    config: &Config,
+    accounts: &[String],
+    dry_run: bool,
+    since: Option<NaiveDate>,
+    mut decider: Option<&mut DecisionFn>,
 ) -> Result<Vec<ImportOutcome>> {
     let wanted: Vec<&str> = if accounts.is_empty() {
         config.accounts.iter().map(|a| a.name.as_str()).collect()
@@ -56,7 +90,7 @@ pub fn run(
     let mut outcomes = Vec::new();
     for name in wanted {
         let account = config.account(name)?;
-        let outcome = import_account(config, account, dry_run, since)?;
+        let outcome = import_account(config, account, dry_run, since, decider.as_deref_mut())?;
         outcomes.push(outcome);
     }
     Ok(outcomes)
@@ -109,6 +143,7 @@ fn import_account(
     account: &crate::config::AccountConfig,
     dry_run: bool,
     since: Option<NaiveDate>,
+    mut decider: Option<&mut DecisionFn>,
 ) -> Result<ImportOutcome> {
     let files = collect_files(&config.in_dir, &account.name)?;
     if files.is_empty() {
@@ -116,6 +151,7 @@ fn import_account(
             account: account.name.clone(),
             new_count: 0,
             already_seen: 0,
+            skipped_as_duplicates: 0,
             preview: None,
             warnings: vec![],
         });
@@ -149,6 +185,7 @@ fn import_account(
             account: account.name.clone(),
             new_count: 0,
             already_seen,
+            skipped_as_duplicates: 0,
             preview: None,
             warnings: vec![],
         });
@@ -156,7 +193,9 @@ fn import_account(
 
     std::fs::create_dir_all(&config.staging_dir)?;
     let staging_csv = config.staging_dir.join(format!("{}.csv", account.name));
-    write_staging_csv(&staging_csv, &new_txs)?;
+    let full_keys: Vec<String> = new_txs.iter().map(|t| t.dedup_key()).collect();
+    let new_refs: Vec<&Transaction> = new_txs.iter().collect();
+    write_staging_csv(&staging_csv, &new_refs)?;
 
     let rules_file = rules::ensure_rules_file(&config.rules_dir, account)?;
 
@@ -165,8 +204,8 @@ fn import_account(
     // come after the staging write — hledger print reads the staged CSV —
     // and never blocks the import: a failure here is a warning gap, not a
     // data hazard.
-    let staged_keys: Vec<String> = new_txs.iter().map(|t| t.dedup_key()).collect();
-    let warnings = overlap::find_overlaps(
+    let staged_keys = full_keys;
+    let flagged_rows = overlap::find_overlaps(
         &config.journal,
         &staging_csv,
         &rules_file,
@@ -179,29 +218,63 @@ fn import_account(
         vec![]
     });
 
-    let mut cmd = hledger_cmd();
-    cmd.arg("import")
-        .arg("-f")
-        .arg(&config.journal)
-        .arg("--rules")
-        .arg(&rules_file);
-    if dry_run {
-        cmd.arg("--dry-run");
+    // Interactive decisions: each flagged row is presented (in staging order,
+    // i.e. chronological) to the decider, which picks "import as-is" or
+    // "skip as duplicate". Skipped rows are recorded as resolved — the user
+    // made a call, so they must not be re-offered next run.
+    let mut skip_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+    if let Some(decide) = decider.as_mut() {
+        for row in &flagged_rows {
+            if !decide(row)? {
+                skip_keys.insert(row.staged_key.clone());
+            }
+        }
     }
-    cmd.arg(&staging_csv);
-    let output = cmd
-        .output()
-        .context("running hledger — is it installed and on PATH? (or set $HLEDGER)")?;
-    if !output.status.success() {
-        bail!(
-            "hledger import failed for account '{}':\n{}",
-            account.name,
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    let skipped_as_duplicates = skip_keys.len();
+    let accepted: Vec<&Transaction> = if skip_keys.is_empty() {
+        new_txs.iter().collect()
+    } else {
+        new_txs
+            .iter()
+            .filter(|t| !skip_keys.contains(&t.dedup_key()))
+            .collect()
+    };
+    // The batch handed to hledger contains only accepted rows.
+    write_staging_csv(&staging_csv, &accepted)?;
+
+    let output = if accepted.is_empty() {
+        // Everything was resolved as a duplicate; nothing to hand to hledger.
+        None
+    } else {
+        let mut cmd = hledger_cmd();
+        cmd.arg("import")
+            .arg("-f")
+            .arg(&config.journal)
+            .arg("--rules")
+            .arg(&rules_file);
+        if dry_run {
+            cmd.arg("--dry-run");
+        }
+        cmd.arg(&staging_csv);
+        let out = cmd
+            .output()
+            .context("running hledger — is it installed and on PATH? (or set $HLEDGER)")?;
+        if !out.status.success() {
+            bail!(
+                "hledger import failed for account '{}':\n{}",
+                account.name,
+                String::from_utf8_lossy(&out.stderr)
+            );
+        }
+        Some(out)
+    };
+    let preview = output
+        .as_ref()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
 
     if !dry_run {
-        // Only record ids once hledger accepted the batch.
+        // Record ids once hledger accepted the batch — including rows the
+        // user resolved as duplicates interactively (their decision stands).
         save_seen(&config.staging_dir, &account.name, &seen)?;
     }
 
@@ -210,8 +283,9 @@ fn import_account(
         account: account.name.clone(),
         new_count,
         already_seen,
-        preview: Some(String::from_utf8_lossy(&output.stdout).into_owned()),
-        warnings,
+        skipped_as_duplicates,
+        preview,
+        warnings: flagged_rows,
     })
 }
 
@@ -244,7 +318,7 @@ fn collect_files(in_dir: &Path, account_name: &str) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-fn write_staging_csv(path: &Path, txs: &[Transaction]) -> Result<()> {
+fn write_staging_csv(path: &Path, txs: &[&Transaction]) -> Result<()> {
     let mut writer = csv::WriterBuilder::new().from_path(path)?;
     for tx in txs {
         writer.write_record(&[

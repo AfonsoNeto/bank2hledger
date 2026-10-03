@@ -40,8 +40,12 @@ pub struct Params {
     pub max_days: i64,
     /// Relative amount difference tolerated (0.05 = 5%: FX spreads, fees).
     pub amount_tolerance: f64,
-    /// Composite score at or above which a pair is flagged.
-    pub threshold: f64,
+    /// Payee similarity that counts as an identifying signal (one shared
+    /// token of ≥3 characters ≈ 1/3).
+    pub min_payee_signal: f64,
+    /// Category agreement that counts as an identifying signal (top-level +
+    /// leaf match = 0.5, exact = 1.0).
+    pub min_category_signal: f64,
     pub weight_amount: f64,
     pub weight_date: f64,
     pub weight_payee: f64,
@@ -53,7 +57,8 @@ impl Default for Params {
         Params {
             max_days: 4,
             amount_tolerance: 0.05,
-            threshold: 0.7,
+            min_payee_signal: 1.0 / 3.0,
+            min_category_signal: 0.5,
             weight_amount: 0.35,
             weight_date: 0.25,
             weight_payee: 0.25,
@@ -73,7 +78,7 @@ pub struct Tx {
     pub counter_accounts: Vec<String>,
 }
 
-/// One flagged pair.
+/// One above-threshold match between a staged row and an existing entry.
 #[derive(Debug, Clone)]
 pub struct Warning {
     pub staged: Tx,
@@ -105,6 +110,31 @@ impl Warning {
             self.score_category,
         )
     }
+
+    /// The existing side of the pair, as shown in an interactive choice menu.
+    pub fn candidate_line(&self) -> String {
+        format!(
+            "{} {} {}{}  (score {:.2}: amount {:.2}, date {:.2}, payee {:.2}, category {:.2})",
+            self.existing.date,
+            self.existing.payee,
+            self.existing.amount.normalize(),
+            self.existing.currency,
+            self.score,
+            self.score_amount,
+            self.score_date,
+            self.score_payee,
+            self.score_category,
+        )
+    }
+}
+
+/// Every above-threshold match for one staged row, best first. Staged rows
+/// with no matches are omitted entirely.
+#[derive(Debug, Clone)]
+pub struct RowMatches {
+    pub staged: Tx,
+    pub staged_key: String,
+    pub matches: Vec<Warning>,
 }
 
 // --- hledger `print -O json` model (only the fields we need) ---
@@ -188,8 +218,9 @@ fn perspective(tx: JsonTx, bank_account: &str) -> Option<Tx> {
     })
 }
 
-/// Compare staged rows against the existing journal and return flagged pairs,
-/// at most one (the best) per staged row.
+/// Compare staged rows against the existing journal. Returns one
+/// [`RowMatches`] per staged row that has at least one above-threshold
+/// match, in staging order, candidates sorted best-first.
 pub fn find_overlaps(
     journal: &Path,
     staging_csv: &Path,
@@ -197,7 +228,7 @@ pub fn find_overlaps(
     bank_account: &str,
     staged_keys: &[String],
     params: &Params,
-) -> Result<Vec<Warning>> {
+) -> Result<Vec<RowMatches>> {
     // Predicted view of the staged rows: this runs the *user's* rules via
     // hledger itself, so counter-accounts are exactly what import will post.
     let staged_json = print_json(&[
@@ -225,26 +256,27 @@ pub fn find_overlaps(
         .filter_map(|t| perspective(t, bank_account))
         .collect();
 
-    let mut warnings = Vec::new();
+    let mut rows = Vec::new();
     for (staged_tx, key) in staged.iter().zip(staged_keys.iter()) {
-        let mut best: Option<Warning> = None;
-        for ex in &existing {
-            if let Some(w) = score_pair(staged_tx, key, ex, params) {
-                if best.as_ref().map_or(true, |b| w.score > b.score) {
-                    best = Some(w);
-                }
-            }
+        let mut matches: Vec<Warning> = existing
+            .iter()
+            .filter_map(|ex| score_pair(staged_tx, key, ex, params))
+            .collect();
+        if matches.is_empty() {
+            continue;
         }
-        if let Some(w) = best {
-            warnings.push(w);
-        }
+        matches.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        rows.push(RowMatches {
+            staged: staged_tx.clone(),
+            staged_key: key.clone(),
+            matches,
+        });
     }
-    warnings.sort_by(|a, b| {
-        b.score
-            .partial_cmp(&a.score)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    Ok(warnings)
+    Ok(rows)
 }
 
 /// Score one pair; `Some` when both hard gates pass and the composite score
@@ -272,14 +304,17 @@ fn score_pair(staged: &Tx, staged_key: &str, existing: &Tx, params: &Params) -> 
     let score_payee = payee_similarity(&staged.payee, &existing.payee);
     let score_category = category_similarity(&staged.counter_accounts, &existing.counter_accounts);
 
+    // Beyond the amount+date gates, require at least one identifying
+    // signal: similar wording OR agreeing category. Same amount on the same
+    // day alone matches every same-priced coffee and must stay silent.
+    if score_payee < params.min_payee_signal && score_category < params.min_category_signal {
+        return None;
+    }
+
     let score = params.weight_amount * score_amount
         + params.weight_date * score_date
         + params.weight_payee * score_payee
         + params.weight_category * score_category;
-
-    if score < params.threshold {
-        return None;
-    }
     Some(Warning {
         staged: staged.clone(),
         staged_key: staged_key.to_string(),
