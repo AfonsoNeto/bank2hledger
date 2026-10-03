@@ -45,6 +45,16 @@ fn run() -> Result<()> {
                         println!("{}: {} new transaction(s)", o.account, o.new_count);
                     }
                 }
+                if !o.warnings.is_empty() {
+                    println!(
+                        "  ⚠ {} possible duplicate(s) against existing journal entries \
+                         (advisory — review before approving; not dropped):",
+                        o.warnings.len()
+                    );
+                    for w in &o.warnings {
+                        println!("    {}", w.summary());
+                    }
+                }
             }
             if dry_run && total_new > 0 {
                 println!("\n(dry run — nothing written; run without --dry-run to import)");

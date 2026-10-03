@@ -15,6 +15,7 @@ use chrono::NaiveDate;
 
 use crate::config::Config;
 use crate::model::Transaction;
+use crate::overlap;
 use crate::profiles;
 use crate::rules;
 
@@ -25,6 +26,10 @@ pub struct ImportOutcome {
     pub already_seen: usize,
     /// Journal-format preview of the transactions that would be added.
     pub preview: Option<String>,
+    /// Staged rows that look like transactions already in the journal
+    /// (advisory — see the `overlap` module). Never populated for batches
+    /// with no new rows.
+    pub warnings: Vec<overlap::Warning>,
 }
 
 pub fn hledger_cmd() -> Command {
@@ -112,6 +117,7 @@ fn import_account(
             new_count: 0,
             already_seen: 0,
             preview: None,
+            warnings: vec![],
         });
     }
 
@@ -144,6 +150,7 @@ fn import_account(
             new_count: 0,
             already_seen,
             preview: None,
+            warnings: vec![],
         });
     }
 
@@ -152,6 +159,25 @@ fn import_account(
     write_staging_csv(&staging_csv, &new_txs)?;
 
     let rules_file = rules::ensure_rules_file(&config.rules_dir, account)?;
+
+    // Overlap detection runs against the journal as it exists BEFORE this
+    // batch (so a real import can't match against its own writes). It must
+    // come after the staging write — hledger print reads the staged CSV —
+    // and never blocks the import: a failure here is a warning gap, not a
+    // data hazard.
+    let staged_keys: Vec<String> = new_txs.iter().map(|t| t.dedup_key()).collect();
+    let warnings = overlap::find_overlaps(
+        &config.journal,
+        &staging_csv,
+        &rules_file,
+        &account.hledger_account,
+        &staged_keys,
+        &overlap::Params::default(),
+    )
+    .unwrap_or_else(|e| {
+        eprintln!("warning: overlap detection skipped: {e:#}");
+        vec![]
+    });
 
     let mut cmd = hledger_cmd();
     cmd.arg("import")
@@ -185,6 +211,7 @@ fn import_account(
         new_count,
         already_seen,
         preview: Some(String::from_utf8_lossy(&output.stdout).into_owned()),
+        warnings,
     })
 }
 

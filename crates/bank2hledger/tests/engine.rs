@@ -537,3 +537,60 @@ fn sanitize_field_replaces_control_chars_keeps_everything_else() {
     assert_eq!(sanitize_field("nul\u{0}byte"), "nul byte");
     assert_eq!(sanitize_field("delete\u{7f}char"), "delete char");
 }
+
+/// End-to-end: a hand-logged recurring transaction and a bank export
+/// containing its next occurrence (different wording, amount a little off,
+/// date shifted by clearing lag) must be flagged as a probable duplicate,
+/// while a coincidentally-same-priced new transaction must not.
+#[test]
+fn overlap_detection_flags_near_duplicates_not_new_transactions() {
+    if !skip_or_panic() {
+        return;
+    }
+    let rig = rig(vec![acct(
+        "test-acct",
+        "monzo_csv",
+        "assets:banks:monzo:personal",
+    )]);
+    // Previously HAND-logged rent for the same period (the tool has never
+    // seen it) — the classic case: the user typed the pending £1350 on the
+    // 1st, the statement settles it on the 3rd at £1347.50.
+    std::fs::write(
+        &rig.config.journal,
+        "2026-09-01 Big Landlord\n    assets:banks:monzo:personal      GBP-1350.00\n    expenses:home:rent                GBP1350.00\n",
+    )
+    .unwrap();
+    // Rules the user would have: landlord → rent.
+    std::fs::create_dir_all(&rig.rules_dir).unwrap();
+    std::fs::write(
+        rig.rules_dir.join("test-acct.rules"),
+        "fields date, description, amount, currency, id\n\
+         date-format %Y-%m-%d\n\
+         currency %currency\n\
+         account1 assets:banks:monzo:personal\n\
+         comment bank2hledger-id:%id\n\
+         account2 expenses:other\n\
+         if\nBIG LANDLORD\n  account2 expenses:home:rent\n",
+    )
+    .unwrap();
+    // Export: September's rent (bank spelling, £2.50 off, dated +2 days by
+    // clearing lag) plus a coincidentally-same-priced new payee.
+    std::fs::write(
+        rig.in_dir.join("test-acct.csv"),
+        format!(
+            "{MONZO_HEADER}{}{}",
+            monzo_row("tx_sep", "03/09/2026", "BIG LANDLORD LTD", "-1347.50"),
+            monzo_row("tx_new", "03/09/2026", "LAPTOP WAREHOUSE", "-1350.00"),
+        ),
+    )
+    .unwrap();
+
+    let outcomes = engine::run(&rig.config, &[], true, None).unwrap();
+    assert_eq!(outcomes[0].warnings.len(), 1, "{:#?}", outcomes[0].warnings);
+    let w = &outcomes[0].warnings[0];
+    assert!(w.summary().contains("BIG LANDLORD LTD"), "{}", w.summary());
+    assert!(w.summary().contains("Big Landlord"), "{}", w.summary());
+    // The same-priced new payee is not flagged: different category and no
+    // token overlap with anything in the journal.
+    assert!(!w.staged.payee.contains("LAPTOP"));
+}
