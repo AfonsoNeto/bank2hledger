@@ -3,7 +3,7 @@ use bank2hledger::{cli, config, engine, init, status};
 #[cfg(feature = "fetch")]
 use bank2hledger::fetchers;
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use clap::Parser as _;
 use cli::{Cli, Command};
 
@@ -22,6 +22,8 @@ fn run() -> Result<()> {
             dry_run,
             account,
             since,
+            #[cfg(feature = "interactive")]
+            interactive,
         } => {
             let config = load_config(cli.config.as_deref())?;
             status::require_journal(&config.journal)?;
@@ -32,8 +34,9 @@ fn run() -> Result<()> {
                     if !std::io::stdin().is_terminal() {
                         bail!("--interactive needs a real terminal for arrow-key selection");
                     }
-                    let mut decider: engine::DecisionFn = |row| choose_duplicate(row);
-                    engine::run_interactive(&config, &account, dry_run, since, &mut decider)?
+                    engine::run_interactive(&config, &account, dry_run, since, &mut |row| {
+                        choose_duplicate(row)
+                    })?
                 } else {
                     engine::run(&config, &account, dry_run, since)?
                 }
@@ -123,7 +126,8 @@ fn run() -> Result<()> {
 /// declare the staged row a duplicate of it, or "None" to import as-is.
 #[cfg(feature = "interactive")]
 fn choose_duplicate(row: &bank2hledger::overlap::RowMatches) -> anyhow::Result<bool> {
-    use dialoguer::{ColorfulTheme, Select};
+    use dialoguer::theme::ColorfulTheme;
+    use dialoguer::Select;
 
     println!("\nPossible duplicate detected:");
     println!(

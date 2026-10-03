@@ -30,6 +30,11 @@ pub enum Command {
         /// Show what would be added without touching the journal.
         #[arg(long)]
         dry_run: bool,
+        /// Pause on each possible duplicate and choose interactively
+        /// (arrow keys) whether to import it or skip it as a duplicate.
+        #[cfg(feature = "interactive")]
+        #[arg(short, long)]
+        interactive: bool,
         /// Restrict to these account names (from the config).
         #[arg(long)]
         account: Vec<String>,

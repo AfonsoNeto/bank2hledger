@@ -32,7 +32,7 @@ rpassword = { version = "7", optional = true }
 dialoguer = { version = "0.11", optional = true }
 
 [features]
-default = ["fetch"]
+default = ["fetch", "interactive"]
 fetch = ["dep:keyring", "dep:open", "dep:reqwest", "dep:rpassword"]
 interactive = ["dep:dialoguer"]
 
