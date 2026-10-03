@@ -307,7 +307,21 @@ fn score_pair(staged: &Tx, staged_key: &str, existing: &Tx, params: &Params) -> 
     // Beyond the amount+date gates, require at least one identifying
     // signal: similar wording OR agreeing category. Same amount on the same
     // day alone matches every same-priced coffee and must stay silent.
-    if score_payee < params.min_payee_signal && score_category < params.min_category_signal {
+    //
+    // Exception: when the existing entry is itself a transfer between money
+    // accounts (assets/liabilities/equity counter-accounts), the staged row
+    // is likely the OTHER side of the same transfer, imported from the
+    // second account's export. Its payee and counter-account naturally
+    // disagree (the staged side still sits in the catch-all), so the normal
+    // signals would miss it and the transfer would be double-counted.
+    let existing_is_transfer = existing
+        .counter_accounts
+        .iter()
+        .any(|a| is_money_account(a));
+    if !existing_is_transfer
+        && score_payee < params.min_payee_signal
+        && score_category < params.min_category_signal
+    {
         return None;
     }
 
@@ -325,6 +339,14 @@ fn score_pair(staged: &Tx, staged_key: &str, existing: &Tx, params: &Params) -> 
         score_payee,
         score_category,
     })
+}
+
+/// Balance-sheet accounts indicate a transfer between the user's own
+/// accounts — the strongest duplicate signal for cross-side imports.
+fn is_money_account(account: &str) -> bool {
+    account.starts_with("assets:")
+        || account.starts_with("liabilities:")
+        || account.starts_with("equity")
 }
 
 /// Token Jaccard on lowercased alphanumeric runs of length ≥ 3. Handles the
