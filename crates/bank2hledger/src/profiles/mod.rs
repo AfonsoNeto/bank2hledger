@@ -7,6 +7,8 @@
 pub mod aqua_pdf;
 pub mod generic_csv;
 pub mod monzo_csv;
+pub mod revolut_common;
+pub mod revolut_csv;
 pub mod revolut_xls;
 pub mod wise_csv;
 
@@ -21,6 +23,7 @@ pub fn parse_file(account: &AccountConfig, path: &std::path::Path) -> Result<Vec
         match account.profile.as_str() {
             "monzo_csv" => monzo_csv::parse(account, bytes),
             "revolut_xls" => revolut_xls::parse(account, path, bytes),
+            "revolut_csv" => revolut_csv::parse(account, path, bytes),
             "wise_csv" => wise_csv::parse(account, bytes),
             "aqua_pdf" => aqua_pdf::parse(account, path),
             "generic_csv" => generic_csv::parse(account, bytes),

@@ -174,7 +174,7 @@ journal = "2026.journal"
 # Per-account hledger CSV rules files live here; edit them freely.
 #rules_dir = "rules"
 
-# Built-in profiles: monzo_csv, revolut_xls, wise_csv, aqua_pdf, generic_csv
+# Built-in profiles: monzo_csv, revolut_xls, revolut_csv, wise_csv, aqua_pdf, generic_csv
 
 [[accounts]]
 name = "monzo-personal"
@@ -244,14 +244,14 @@ hledger_account = "assets:banks:monzo:personal"
             }
             validate_account_name(&a.name)?;
             match a.profile.as_str() {
-                "monzo_csv" | "revolut_xls" | "wise_csv" | "aqua_pdf" => {}
+                "monzo_csv" | "revolut_xls" | "revolut_csv" | "wise_csv" | "aqua_pdf" => {}
                 "generic_csv" if a.generic.is_some() => {}
                 "generic_csv" => bail!(
                     "account '{}': profile 'generic_csv' requires an [accounts.generic] spec",
                     a.name
                 ),
                 other => bail!(
-                    "account '{}': unknown profile '{}' (known: monzo_csv, revolut_xls, wise_csv, aqua_pdf, generic_csv)",
+                    "account '{}': unknown profile '{}' (known: monzo_csv, revolut_xls, revolut_csv, wise_csv, aqua_pdf, generic_csv)",
                     a.name,
                     other
                 ),
