@@ -42,29 +42,35 @@ Arrow keys move between every above-threshold match, **Enter** declares the stag
 
 The same review-before-you-approve workflow as the CLI loop above, in the same order, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark).
 
-**`init` / config — Home** (quick actions, workspace paths, setup checklist including an hledger check):
+<a id="gui-home"></a>
+**[`init` / config — Home](#setup)** (quick actions, workspace paths, setup checklist including an hledger check) — *back to [Get data in](#loop-data-in)*:
 
 ![Home: quick actions, workspace paths, and a setup checklist including an hledger check](docs/screenshots/home.png)
 
-**`import --dry-run` — Import** (per-account cards with a preview table of the new transactions):
+<a id="gui-preview"></a>
+**[`import --dry-run` — Import](#loop-preview)** (per-account cards with a preview table of the new transactions):
 
 ![Import page: per-account cards with a preview table of new transactions before importing](docs/screenshots/import-preview.png)
 
-**`import -i` — resolving duplicates** (tick *Resolve possible duplicates*; every flagged row gets a dropdown of matching journal entries plus "None — import as it is"):
+<a id="gui-duplicates"></a>
+**[`import -i` — resolving duplicates](#loop-import)** (tick *Resolve possible duplicates*; every flagged row gets a dropdown of matching journal entries plus "None — import as it is") — *full walkthrough: [Resolving duplicates interactively](#resolving-duplicates-interactively)*:
 
 ![Import page with duplicate resolution enabled: a panel listing possible duplicates, each with a dropdown of matching journal entries](docs/screenshots/duplicates.png)
 
 ![The open dropdown: the matching journal entry with its score, above the default None option](docs/screenshots/duplicates-dropdown.png)
 
-**`status` — Balances** (current balances of the configured accounts, for comparison with the bank apps):
+<a id="gui-balances"></a>
+**[`status` — Balances](#loop-verify)** (current balances of the configured accounts, for comparison with the bank apps):
 
 ![Balances: current hledger balances of the configured accounts for comparison with the bank apps](docs/screenshots/balances.png)
 
-**Categorization — Rules** (the per-account hledger CSV rules files, which bank2hledger generates once and never rewrites):
+<a id="gui-rules"></a>
+**[Categorization — Rules](#loop-categorize)** (the per-account hledger CSV rules files, which bank2hledger generates once and never rewrites):
 
 ![Rules: the per-account hledger CSV rules files, which bank2hledger generates once and never rewrites](docs/screenshots/rules.png)
 
-**Settings** (workspace paths and preferences):
+<a id="gui-settings"></a>
+**[Settings](#setup)** (workspace paths and preferences):
 
 ![Settings: workspace paths and preferences](docs/screenshots/settings.png)
 
@@ -130,14 +136,14 @@ $ bank2hledger fetch
 
 ## The review loop
 
-1. **Get data in**: drop exports into `in/`, or run `fetch`.
-2. **Preview**: `bank2hledger import --dry-run` — shows exactly the batch that would be added.
-3. **Categorize**: unmatched payees land in `expenses:other`; add a mapping to the account's rules file (`rules/<account>.rules`) and re-run. Mappings are plain hledger regexes, matched case-insensitively; *later rules win*, so the catch-all sits first and specific blocks after it.
-4. **Import**: `bank2hledger import -i` — appends only new transactions; re-running or re-dropping files can never duplicate. `-i`/`--interactive` pauses at every possible duplicate (see above) and lets you decide with the arrow keys; without it, duplicates are only flagged for review.
-5. **Verify**: `bank2hledger status` — compare against the real balances in your bank apps.
-6. **Approve**: `git commit`. To reject a batch: `git checkout -- 2026.journal`, fix the rules, re-run.
+1. <a id="loop-data-in"></a>**Get data in**: drop exports into `in/`, or run `fetch`. *GUI: [Home](#gui-home).*
+2. <a id="loop-preview"></a>**Preview**: `bank2hledger import --dry-run` — shows exactly the batch that would be added. *GUI: [Import preview](#gui-preview).*
+3. <a id="loop-categorize"></a>**Categorize**: unmatched payees land in `expenses:other`; add a mapping to the account's rules file (`rules/<account>.rules`) and re-run. Mappings are plain hledger regexes, matched case-insensitively; *later rules win*, so the catch-all sits first and specific blocks after it. *GUI: [Rules](#gui-rules).*
+4. <a id="loop-import"></a>**Import**: `bank2hledger import -i` — appends only new transactions; re-running or re-dropping files can never duplicate. `-i`/`--interactive` pauses at every possible duplicate (see above) and lets you decide with the arrow keys; without it, duplicates are only flagged for review. *GUI: [duplicate resolution](#gui-duplicates).*
+5. <a id="loop-verify"></a>**Verify**: `bank2hledger status` — compare against the real balances in your bank apps. *GUI: [Balances](#gui-balances).*
+6. <a id="loop-approve"></a>**Approve**: `git commit`. To reject a batch: `git checkout -- 2026.journal`, fix the rules, re-run.
 
-Every step has a GUI equivalent — the [Windows GUI](#the-windows-gui) section below shows each one in order.
+Every step has a GUI equivalent — the [Windows GUI](#the-windows-gui) section below shows each one in order, and the links above jump straight to each screenshot.
 
 ## Privacy
 
