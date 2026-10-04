@@ -40,7 +40,7 @@ Arrow keys move between every above-threshold match, **Enter** declares the stag
 
 ## The Windows GUI
 
-The same review-before-you-approve workflow, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark). Drop exports in, preview what's new, import, verify:
+The same review-before-you-approve workflow, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark). Drop exports in, preview what's new, import, verify — including the interactive duplicate resolution (tick **Resolve possible duplicates** on the Import page):
 
 ![Import page: per-account cards with a preview table of new transactions before importing](docs/screenshots/import-preview.png)
 

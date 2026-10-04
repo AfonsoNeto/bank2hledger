@@ -4,6 +4,18 @@
 library with the CLI. It targets Windows (10 with WebView2 update, 11 natively)
 and is styled after Windows 11 Settings.
 
+## Resolving duplicates interactively
+
+On the Import page, tick **Resolve possible duplicates** (hover or click it
+for the full explanation). Once ticked, every Preview lists the transactions
+that look like ones already in your journal — each with a dropdown of the
+matching journal entries plus **None — import the new transaction as it is**
+(the default). Pick a match and the row is skipped as a duplicate when you
+import (remembered, never offered again); pick None and it imports unchanged.
+The result message reports how many rows were skipped. Leaving the checkbox
+unticked keeps the old behaviour: duplicates are only flagged in the preview,
+never acted on.
+
 ## Architecture
 
 - **Backend** (`src-tauri/src/commands.rs`): thin Tauri commands that wrap the

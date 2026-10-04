@@ -54,7 +54,7 @@ pub fn run(
     dry_run: bool,
     since: Option<NaiveDate>,
 ) -> Result<Vec<ImportOutcome>> {
-    run_inner(config, accounts, dry_run, since, None)
+    run_inner(config, accounts, dry_run, since, &mut Decider::None)
 }
 
 /// Like [`run`], but pauses on every flagged row and asks `decider` whether
@@ -68,7 +68,44 @@ pub fn run_interactive(
     since: Option<NaiveDate>,
     decider: &mut DecisionFn,
 ) -> Result<Vec<ImportOutcome>> {
-    run_inner(config, accounts, dry_run, since, Some(decider))
+    run_inner(
+        config,
+        accounts,
+        dry_run,
+        since,
+        &mut Decider::Callback(decider),
+    )
+}
+
+/// Like [`run`], but skips the staged rows whose dedup keys appear in
+/// `skip_keys` — the GUI collects these decisions up front from the
+/// preview's duplicate choices. Skipped rows are recorded as resolved
+/// (never re-offered), counted in `skipped_as_duplicates`, and keys that
+/// don't correspond to flagged rows are ignored.
+pub fn run_with_decisions(
+    config: &Config,
+    accounts: &[String],
+    dry_run: bool,
+    since: Option<NaiveDate>,
+    skip_keys: &HashSet<String>,
+) -> Result<Vec<ImportOutcome>> {
+    run_inner(
+        config,
+        accounts,
+        dry_run,
+        since,
+        &mut Decider::SkipKeys(skip_keys),
+    )
+}
+
+/// How interactive duplicate decisions reach the import: none (advisory
+/// only — flagged rows are reported, never acted on), a per-row callback
+/// (CLI `--interactive`), or a pre-collected set of staged keys to skip
+/// (GUI: decisions made in the preview).
+pub enum Decider<'a> {
+    None,
+    Callback(&'a mut DecisionFn<'a>),
+    SkipKeys(&'a HashSet<String>),
 }
 
 fn run_inner(
@@ -76,7 +113,7 @@ fn run_inner(
     accounts: &[String],
     dry_run: bool,
     since: Option<NaiveDate>,
-    mut decider: Option<&mut DecisionFn>,
+    decider: &mut Decider<'_>,
 ) -> Result<Vec<ImportOutcome>> {
     let wanted: Vec<&str> = if accounts.is_empty() {
         config.accounts.iter().map(|a| a.name.as_str()).collect()
@@ -90,7 +127,7 @@ fn run_inner(
     let mut outcomes = Vec::new();
     for name in wanted {
         let account = config.account(name)?;
-        let outcome = import_account(config, account, dry_run, since, decider.as_deref_mut())?;
+        let outcome = import_account(config, account, dry_run, since, &mut *decider)?;
         outcomes.push(outcome);
     }
     Ok(outcomes)
@@ -138,12 +175,57 @@ pub fn preview_account(
     Ok(outcome)
 }
 
+/// Flagged rows for one account without importing: parses, dedups, writes
+/// the staging CSV and asks hledger to render the staged rows through the
+/// account's rules, so candidates carry the accounts the import would use.
+/// Unlike [`preview_account`], this invokes hledger and writes the staging
+/// CSV — the GUI calls it only when the user opts into duplicate resolution.
+pub fn preview_duplicates(
+    config: &Config,
+    account_name: &str,
+    since: Option<NaiveDate>,
+) -> Result<Vec<overlap::RowMatches>> {
+    let account = config.account(account_name)?;
+    let files = collect_files(&config.in_dir, account_name)?;
+    let mut txs = Vec::new();
+    for file in &files {
+        txs.extend(profiles::parse_file(account, file)?);
+    }
+    if let Some(since) = since {
+        txs.retain(|t| t.date >= since);
+    }
+    txs.sort_by(|a, b| a.date.cmp(&b.date).then_with(|| a.payee.cmp(&b.payee)));
+
+    let seen = load_seen(&config.staging_dir, account_name)?;
+    let new: Vec<&Transaction> = txs
+        .iter()
+        .filter(|t| !seen.contains(&t.dedup_key()))
+        .collect();
+    if new.is_empty() {
+        return Ok(vec![]);
+    }
+
+    std::fs::create_dir_all(&config.staging_dir)?;
+    let staging_csv = config.staging_dir.join(format!("{}.csv", account_name));
+    write_staging_csv(&staging_csv, &new)?;
+    let rules_file = rules::ensure_rules_file(&config.rules_dir, account)?;
+    let keys: Vec<String> = new.iter().map(|t| t.dedup_key()).collect();
+    overlap::find_overlaps(
+        &config.journal,
+        &staging_csv,
+        &rules_file,
+        &account.hledger_account,
+        &keys,
+        &overlap::Params::default(),
+    )
+}
+
 fn import_account(
     config: &Config,
     account: &crate::config::AccountConfig,
     dry_run: bool,
     since: Option<NaiveDate>,
-    mut decider: Option<&mut DecisionFn>,
+    decider: &mut Decider<'_>,
 ) -> Result<ImportOutcome> {
     let files = collect_files(&config.in_dir, &account.name)?;
     if files.is_empty() {
@@ -223,10 +305,20 @@ fn import_account(
     // "skip as duplicate". Skipped rows are recorded as resolved — the user
     // made a call, so they must not be re-offered next run.
     let mut skip_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
-    if let Some(decide) = decider.as_mut() {
-        for row in &flagged_rows {
-            if !decide(row)? {
-                skip_keys.insert(row.staged_key.clone());
+    match decider {
+        Decider::None => {}
+        Decider::Callback(decide) => {
+            for row in &flagged_rows {
+                if !decide(row)? {
+                    skip_keys.insert(row.staged_key.clone());
+                }
+            }
+        }
+        Decider::SkipKeys(keys) => {
+            for row in &flagged_rows {
+                if keys.contains(&row.staged_key) {
+                    skip_keys.insert(row.staged_key.clone());
+                }
             }
         }
     }

@@ -2,7 +2,11 @@ import React from "react";
 import {
   Button,
   Card,
+  Checkbox,
   createTableColumn,
+  Dropdown,
+  Option,
+  Tooltip,
   DataGrid,
   DataGridBody,
   DataGridCell,
@@ -30,6 +34,16 @@ const useStyles = makeStyles({
   amountIn: { color: tokens.colorPaletteGreenForeground1 },
   amountOut: { color: tokens.colorPaletteRedForeground1 },
   actions: { display: "flex", ...shorthands.gap("8px") },
+  dupWrap: {
+    display: "flex",
+    flexDirection: "column",
+    ...shorthands.gap("8px"),
+    ...shorthands.padding("8px"),
+    ...shorthands.borderRadius("6px"),
+    backgroundColor: tokens.colorPaletteYellowBackground2,
+  },
+  dupRow: { display: "flex", alignItems: "center", justifyContent: "space-between", ...shorthands.gap("12px") },
+  dupPick: { minWidth: "420px" },
 });
 
 function formatBytes(n: number): string {
@@ -83,13 +97,25 @@ type AccountState = {
   importing: boolean;
   result: string | null;
   error: string | null;
+  /// Per flagged row (staged_key): the selected option index in the
+  /// duplicate menu. 0 = "None — import as it is" (the default).
+  choices: Record<string, number>;
 };
+
+/// Helper text for the duplicate-resolution checkbox, shown on hover/focus.
+const resolveDuplicatesTooltip =
+  "After Preview, list every transaction that looks like one already in " +
+  "your journal. For each, pick the matching entry and it will be skipped " +
+  "as a duplicate (remembered, never offered again), or pick 'None' to " +
+  "import it unchanged. Use it when your journal has hand-entered history " +
+  "that the bank exports would otherwise double-count.";
 
 export function ImportPage({ workspace }: { workspace: WorkspaceInfo }) {
   const styles = useStyles();
   const [accounts, setAccounts] = React.useState<AccountInbox[] | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [states, setStates] = React.useState<Record<string, AccountState>>({});
+  const [resolveDuplicates, setResolveDuplicates] = React.useState(false);
 
   const refresh = React.useCallback(async () => {
     setError(null);
@@ -113,14 +139,40 @@ export function ImportPage({ workspace }: { workspace: WorkspaceInfo }) {
         importing: false,
         result: null,
         error: null,
+        choices: {},
       };
       return { ...prev, [account]: { ...base, ...patch } };
     });
 
   const doPreview = async (account: string) => {
-    setState(account, { busy: true, result: null, error: null });
+    setState(account, { busy: true, result: null, error: null, choices: {} });
     try {
-      setState(account, { preview: await previewImport(account), busy: false });
+      setState(account, {
+        preview: await previewImport(account, resolveDuplicates),
+        busy: false,
+      });
+    } catch (e) {
+      setState(account, { busy: false, error: String(e) });
+    }
+  };
+
+  const toggleResolveDuplicates = (checked: boolean) => {
+    setResolveDuplicates(checked);
+    // Re-preview every account that already has one, so the duplicate
+    // choices appear as soon as the rows are identified.
+    if (states) {
+      for (const [account, s] of Object.entries(states)) {
+        if (s.preview && !s.busy && !s.importing) {
+          void doPreviewWith(account, checked);
+        }
+      }
+    }
+  };
+
+  const doPreviewWith = async (account: string, resolve: boolean) => {
+    setState(account, { busy: true, result: null, error: null, choices: {} });
+    try {
+      setState(account, { preview: await previewImport(account, resolve), busy: false });
     } catch (e) {
       setState(account, { busy: false, error: String(e) });
     }
@@ -129,13 +181,23 @@ export function ImportPage({ workspace }: { workspace: WorkspaceInfo }) {
   const doImport = async (account: string, dryRun: boolean) => {
     setState(account, { importing: true, error: null });
     try {
-      const r = await runImport(account, dryRun);
+      const s = states[account];
+      const skipKeys = resolveDuplicates
+        ? (s?.preview?.duplicates ?? [])
+            .filter((d) => (s?.choices[d.staged_key] ?? 0) > 0)
+            .map((d) => d.staged_key)
+        : [];
+      const r = await runImport(account, dryRun, skipKeys);
       setState(account, {
         importing: false,
         result:
-          r.new_count === 0
+          r.new_count === 0 && r.skipped_as_duplicates === 0
             ? "Nothing new to import."
-            : `Imported ${r.new_count} transaction(s) (${r.already_seen} already imported). Now check Balances against your bank app, then git commit to approve.`,
+            : `Imported ${r.new_count} transaction(s) (${r.already_seen} already imported` +
+              (r.skipped_as_duplicates > 0
+                ? `, ${r.skipped_as_duplicates} skipped as duplicates`
+                : "") +
+              "). Now check Balances against your bank app, then git commit to approve.",
       });
     } catch (e) {
       setState(account, { importing: false, error: String(e) });
@@ -161,6 +223,13 @@ export function ImportPage({ workspace }: { workspace: WorkspaceInfo }) {
         Files bind to accounts by filename prefix (<code>&lt;account&gt;*.csv</code>) — there
         is no guessing. Preview first; nothing is written until you import.
       </Text>
+      <Tooltip content={resolveDuplicatesTooltip} relationship="label">
+        <Checkbox
+          label="Resolve possible duplicates"
+          checked={resolveDuplicates}
+          onChange={(_e, data) => toggleResolveDuplicates(!!data.checked)}
+        />
+      </Tooltip>
       {accounts.map((a) => {
         const s = states[a.account] ?? {
           preview: null, busy: false, importing: false, result: null, error: null,
@@ -221,6 +290,62 @@ export function ImportPage({ workspace }: { workspace: WorkspaceInfo }) {
                         )}
                       </DataGridBody>
                     </DataGrid>
+                  </div>
+                )}
+                {resolveDuplicates && s.preview.duplicates.length > 0 && (
+                  <div className={styles.dupWrap}>
+                    <Text weight="semibold">
+                      Possible duplicates — pick the matching journal entry, or "None" to
+                      import as it is:
+                    </Text>
+                    {s.preview.duplicates.map((d) => {
+                      const selected = s.choices[d.staged_key] ?? 0;
+                      return (
+                        <div key={d.staged_key} className={styles.dupRow}>
+                          <Text>
+                            {d.date} {d.payee} {d.amount} {d.currency}
+                          </Text>
+                          <Dropdown
+                            className={styles.dupPick}
+                            value={
+                              selected === 0
+                                ? "None — import the new transaction as it is"
+                                : `${d.candidates[selected - 1].date} ${d.candidates[selected - 1].payee} ${d.candidates[selected - 1].amount}${d.candidates[selected - 1].currency} (score ${d.candidates[selected - 1].score.toFixed(2)})`
+                            }
+                            selectedOptions={[String(selected)]}
+                            onOptionSelect={(_e, data) =>
+                              setStates((prev) => ({
+                                ...prev,
+                                [a.account]: {
+                                  ...(prev[a.account] ?? {
+                                    preview: null, busy: false, importing: false,
+                                    result: null, error: null, choices: {},
+                                  }),
+                                  choices: {
+                                    ...(prev[a.account]?.choices ?? {}),
+                                    [d.staged_key]: Number(data.optionValue ?? "0"),
+                                  },
+                                },
+                              }))
+                            }
+                          >
+                            <Option value="0" text="None — import the new transaction as it is">
+                              None — import the new transaction as it is
+                            </Option>
+                            {d.candidates.map((c, i) => (
+                              <Option
+                                key={i}
+                                value={String(i + 1)}
+                                text={`${c.date} ${c.payee} ${c.amount}${c.currency} (score ${c.score.toFixed(2)})`}
+                              >
+                                {c.date} {c.payee} {c.amount}
+                                {c.currency} (score {c.score.toFixed(2)})
+                              </Option>
+                            ))}
+                          </Dropdown>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </>

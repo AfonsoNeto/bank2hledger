@@ -27,7 +27,7 @@ use anyhow::{Context, Result};
 use chrono::{Datelike, NaiveDate};
 use rust_decimal::prelude::ToPrimitive;
 use rust_decimal::Decimal;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::engine::hledger_cmd;
 
@@ -75,7 +75,7 @@ impl Default for Params {
 
 /// A transaction in comparable form: the bank-side posting's amount plus the
 /// counter-accounts the entry moved money to/from.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Tx {
     pub date: NaiveDate,
     pub payee: String,
@@ -85,7 +85,7 @@ pub struct Tx {
 }
 
 /// One above-threshold match between a staged row and an existing entry.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Warning {
     pub staged: Tx,
     pub staged_key: String,
@@ -136,7 +136,7 @@ impl Warning {
 
 /// Every above-threshold match for one staged row, best first. Staged rows
 /// with no matches are omitted entirely.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RowMatches {
     pub staged: Tx,
     pub staged_key: String,

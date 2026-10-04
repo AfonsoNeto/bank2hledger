@@ -4,6 +4,7 @@
 
 import {
   AccountInbox,
+  DuplicateRow,
   FileEntry,
   ImportResult,
   PreviewDto,
@@ -65,10 +66,50 @@ const inbox: AccountInbox[] = [
   },
 ];
 
+/// Duplicate candidates for the mock workspace, keyed by account. The
+/// staged keys match the preview rows' external ids (dedup-key format).
+const duplicates: Record<string, DuplicateRow[]> = {
+  "monzo-personal": [
+    {
+      staged_key: "id:tx_09Kd2",
+      date: "2026-09-21",
+      payee: "Corner Grocer",
+      amount: "-23.14",
+      currency: "GBP",
+      candidates: [
+        {
+          date: "2026-09-14",
+          payee: "Corner Grocer",
+          amount: "-23.14",
+          currency: "GBP",
+          score: 0.92,
+        },
+      ],
+    },
+    {
+      staged_key: "id:tx_09Kh7",
+      date: "2026-09-24",
+      payee: "Netflix",
+      amount: "-10.99",
+      currency: "GBP",
+      candidates: [
+        {
+          date: "2026-09-24",
+          payee: "Netflix subscription",
+          amount: "-10.99",
+          currency: "GBP",
+          score: 1.0,
+        },
+      ],
+    },
+  ],
+};
+
 const preview: Record<string, PreviewDto> = {
   "monzo-personal": {
     account: "monzo-personal",
     already_seen: 14,
+    duplicates: [],
     new: [
       { date: "2026-09-21", payee: "Corner Grocer", amount: "-23.14", currency: "GBP", external_id: "tx_09Kd2", notes: null },
       { date: "2026-09-22", payee: "Transport for London", amount: "-5.60", currency: "GBP", external_id: "tx_09Ke9", notes: null },
@@ -102,14 +143,25 @@ export function handle(cmd: string, args: Record<string, unknown> = {}): Promise
       return ok(workspace);
     case "inbox_files":
       return ok(inbox);
-    case "preview_import":
-      return ok(preview[args.account as string] ?? { account: args.account, already_seen: 0, new: [] });
+    case "preview_import": {
+      const p = preview[args.account as string] ?? {
+        account: args.account as string,
+        already_seen: 0,
+        duplicates: [],
+        new: [],
+      };
+      return args.resolveDuplicates
+        ? ok({ ...p, duplicates: duplicates[args.account as string] ?? [] })
+        : ok({ ...p, duplicates: [] });
+    }
     case "run_import": {
       const p = preview[args.account as string];
+      const skipKeys = (args.skipKeys as string[] | undefined) ?? [];
       const result: ImportResult = {
         account: args.account as string,
-        new_count: p?.new.length ?? 0,
+        new_count: Math.max(0, (p?.new.length ?? 0) - skipKeys.length),
         already_seen: p?.already_seen ?? 0,
+        skipped_as_duplicates: skipKeys.length,
         preview: null,
       };
       return ok(result);

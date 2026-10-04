@@ -780,3 +780,73 @@ fn interactive_dry_run_decides_without_writing() {
         "dry run records nothing"
     );
 }
+
+/// GUI flow: duplicate decisions are collected up front from the preview
+/// (staged keys to skip) and applied via run_with_decisions. Skipped rows
+/// are excluded from the batch and recorded as resolved.
+#[test]
+fn run_with_decisions_skips_flagged_keys() {
+    if !skip_or_panic() {
+        return;
+    }
+    let rig = rig(vec![acct(
+        "test-acct",
+        "monzo_csv",
+        "assets:banks:monzo:personal",
+    )]);
+    std::fs::write(
+        &rig.config.journal,
+        "2026-09-01 Big Landlord\n    assets:banks:monzo:personal      GBP-1350.00\n    expenses:home:rent                GBP1350.00\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(&rig.rules_dir).unwrap();
+    std::fs::write(
+        rig.rules_dir.join("test-acct.rules"),
+        "fields date, description, amount, currency, id\n\
+         date-format %Y-%m-%d\n\
+         currency %currency\n\
+         account1 assets:banks:monzo:personal\n\
+         comment bank2hledger-id:%id\n\
+         account2 expenses:other\n",
+    )
+    .unwrap();
+    std::fs::write(
+        rig.in_dir.join("test-acct.csv"),
+        format!(
+            "{MONZO_HEADER}{}{}",
+            monzo_row("tx_rent", "03/09/2026", "BIG LANDLORD LTD", "-1347.50"),
+            monzo_row("tx_new", "03/09/2026", "LAPTOP WAREHOUSE", "-1350.00"),
+        ),
+    )
+    .unwrap();
+
+    // The GUI's flow: preview first to identify duplicates, then import with
+    // the skip set built from the user's choices.
+    let preview = engine::preview_account(&rig.config, "test-acct", None).unwrap();
+    assert_eq!(preview.new.len(), 2);
+    let duplicates = engine::preview_duplicates(&rig.config, "test-acct", None).unwrap();
+    assert_eq!(duplicates.len(), 1, "{:#?}", duplicates);
+    assert_eq!(duplicates[0].staged_key, "id:tx_rent");
+    assert!(duplicates[0]
+        .matches
+        .iter()
+        .any(|w| w.existing.payee == "Big Landlord"));
+
+    let skip_keys: std::collections::HashSet<String> = duplicates
+        .iter()
+        .map(|row| row.staged_key.clone())
+        .collect();
+    let outcomes = engine::run_with_decisions(&rig.config, &[], false, None, &skip_keys).unwrap();
+    assert_eq!(outcomes[0].skipped_as_duplicates, 1);
+    assert_eq!(outcomes[0].new_count, 2, "rows offered before skips");
+
+    let text = std::fs::read_to_string(&rig.config.journal).unwrap();
+    assert!(!text.contains("bank2hledger-id:tx_rent"), "{text}");
+    assert!(text.contains("bank2hledger-id:tx_new"));
+    assert_eq!(text.lines().filter(|l| l.starts_with("20")).count(), 2);
+
+    // Resolved rows are never re-offered.
+    let outcomes = engine::run(&rig.config, &[], false, None).unwrap();
+    assert_eq!(outcomes[0].new_count, 0);
+    assert_eq!(outcomes[0].already_seen, 2);
+}

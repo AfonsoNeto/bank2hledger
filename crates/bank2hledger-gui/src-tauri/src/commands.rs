@@ -76,6 +76,33 @@ pub struct PreviewDto {
     pub account: String,
     pub new: Vec<PreviewTransaction>,
     pub already_seen: usize,
+    /// Populated only when the preview is requested with duplicate
+    /// resolution: staged rows that look like transactions already in the
+    /// journal, each with the candidate entries to choose from.
+    pub duplicates: Vec<DuplicateRowDto>,
+}
+
+/// One above-threshold overlap match, as shown in a duplicate choice menu.
+#[derive(Serialize)]
+pub struct DuplicateCandidateDto {
+    pub date: String,
+    pub payee: String,
+    pub amount: String,
+    pub currency: String,
+    pub score: f64,
+}
+
+/// A staged row that looks like a transaction already in the journal.
+#[derive(Serialize)]
+pub struct DuplicateRowDto {
+    /// The staged row's dedup key — the GUI passes it back in
+    /// `run_import.skip_keys` to skip the row as a duplicate.
+    pub staged_key: String,
+    pub date: String,
+    pub payee: String,
+    pub amount: String,
+    pub currency: String,
+    pub candidates: Vec<DuplicateCandidateDto>,
 }
 
 #[derive(Serialize)]
@@ -83,6 +110,9 @@ pub struct ImportResult {
     pub account: String,
     pub new_count: usize,
     pub already_seen: usize,
+    /// Rows skipped as duplicates during this import (GUI duplicate
+    /// resolution or CLI `--interactive`).
+    pub skipped_as_duplicates: usize,
     /// hledger's journal-format rendering of what was (or would be) added.
     pub preview: Option<String>,
 }
@@ -292,11 +322,22 @@ pub fn inbox_files(state: tauri::State<AppState>) -> Result<Vec<AccountInbox>, S
 #[tauri::command]
 pub async fn preview_import(
     account: String,
+    resolve_duplicates: Option<bool>,
     state: tauri::State<'_, AppState>,
 ) -> Result<PreviewDto, String> {
+    let resolve = resolve_duplicates.unwrap_or(false);
     let (_, config) = current_workspace(&state)?;
-    let out = tauri::async_runtime::spawn_blocking(move || {
-        engine::preview_account(&config, &account, None).map_err(err)
+    let (out, duplicates) = tauri::async_runtime::spawn_blocking(move || {
+        let out = engine::preview_account(&config, &account, None).map_err(err)?;
+        // Only when opted in: this writes the staging CSV and invokes
+        // hledger print (through the account's rules) so candidates carry
+        // the accounts the import would post to.
+        let duplicates = if resolve {
+            engine::preview_duplicates(&config, &account, None).map_err(err)?
+        } else {
+            Vec::new()
+        };
+        Ok::<_, String>((out, duplicates))
     })
     .await
     .map_err(|e| e.to_string())??;
@@ -304,6 +345,27 @@ pub async fn preview_import(
     Ok(PreviewDto {
         account: out.account,
         already_seen: out.already_seen,
+        duplicates: duplicates
+            .iter()
+            .map(|row| DuplicateRowDto {
+                staged_key: row.staged_key.clone(),
+                date: row.staged.date.format("%Y-%m-%d").to_string(),
+                payee: row.staged.payee.clone(),
+                amount: row.staged.amount.normalize().to_string(),
+                currency: row.staged.currency.clone(),
+                candidates: row
+                    .matches
+                    .iter()
+                    .map(|w| DuplicateCandidateDto {
+                        date: w.existing.date.format("%Y-%m-%d").to_string(),
+                        payee: w.existing.payee.clone(),
+                        amount: w.existing.amount.normalize().to_string(),
+                        currency: w.existing.currency.clone(),
+                        score: w.score,
+                    })
+                    .collect(),
+            })
+            .collect(),
         new: out
             .new
             .iter()
@@ -323,13 +385,22 @@ pub async fn preview_import(
 pub async fn run_import(
     account: String,
     dry_run: bool,
+    skip_keys: Option<Vec<String>>,
     state: tauri::State<'_, AppState>,
 ) -> Result<ImportResult, String> {
     let (_, config) = current_workspace(&state)?;
     tauri::async_runtime::spawn_blocking(move || {
         status::require_journal(&config.journal).map_err(err)?;
-        // engine::run returns exactly one outcome per requested account.
-        let mut outcomes = engine::run(&config, &[account], dry_run, None).map_err(err)?;
+        // Keys the user marked as duplicates in the preview: those staged
+        // rows are skipped and recorded as resolved. engine::run_with_
+        // decisions returns exactly one outcome per requested account.
+        let mut outcomes = match skip_keys.filter(|k| !k.is_empty()) {
+            Some(keys) => {
+                let set: std::collections::HashSet<String> = keys.into_iter().collect();
+                engine::run_with_decisions(&config, &[account], dry_run, None, &set).map_err(err)?
+            }
+            None => engine::run(&config, &[account], dry_run, None).map_err(err)?,
+        };
         let o = outcomes
             .pop()
             .ok_or_else(|| "engine returned no outcome".to_string())?;
@@ -337,6 +408,7 @@ pub async fn run_import(
             account: o.account,
             new_count: o.new_count,
             already_seen: o.already_seen,
+            skipped_as_duplicates: o.skipped_as_duplicates,
             preview: o.preview,
         })
     })

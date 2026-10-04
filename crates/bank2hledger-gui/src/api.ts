@@ -55,16 +55,39 @@ export interface PreviewTransaction {
   notes: string | null;
 }
 
+export interface DuplicateCandidate {
+  date: string;
+  payee: string;
+  amount: string;
+  currency: string;
+  score: number;
+}
+
+/// A staged row that looks like a transaction already in the journal. Pass
+/// `staged_key` back in `runImport.skipKeys` to skip it as a duplicate.
+export interface DuplicateRow {
+  staged_key: string;
+  date: string;
+  payee: string;
+  amount: string;
+  currency: string;
+  candidates: DuplicateCandidate[];
+}
+
 export interface PreviewDto {
   account: string;
   new: PreviewTransaction[];
   already_seen: number;
+  /// Only populated when previewImport is called with resolveDuplicates.
+  duplicates: DuplicateRow[];
 }
 
 export interface ImportResult {
   account: string;
   new_count: number;
   already_seen: number;
+  /// Rows skipped as duplicates during this import.
+  skipped_as_duplicates: number;
   preview: string | null;
 }
 
@@ -85,12 +108,16 @@ export function inboxFiles(): Promise<AccountInbox[]> {
   return call("inbox_files");
 }
 
-export function previewImport(account: string): Promise<PreviewDto> {
-  return call("preview_import", { account });
+export function previewImport(account: string, resolveDuplicates: boolean): Promise<PreviewDto> {
+  return call("preview_import", { account, resolveDuplicates });
 }
 
-export function runImport(account: string, dryRun: boolean): Promise<ImportResult> {
-  return call("run_import", { account, dryRun });
+export function runImport(
+  account: string,
+  dryRun: boolean,
+  skipKeys: string[],
+): Promise<ImportResult> {
+  return call("run_import", { account, dryRun, skipKeys });
 }
 
 export function getStatus(): Promise<string> {
