@@ -17,6 +17,13 @@ function usePrefersDark(): boolean {
   return dark;
 }
 
+// A plain browser has no Mica behind the transparent window — flag it so
+// styles.css paints a themed backdrop instead (the Tauri window stays
+// transparent and keeps letting Mica show through).
+if (typeof window !== "undefined" && !("__TAURI_INTERNALS__" in window)) {
+  document.documentElement.classList.add("browser-mode");
+}
+
 function ThemedApp() {
   const dark = usePrefersDark();
   return (

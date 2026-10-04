@@ -1,5 +1,12 @@
 /* The window uses Mica (Windows 11 backdrop material), so the app background
-   must stay transparent — Fluent cards paint their own surfaces on top. */
+   must stay transparent there — Fluent cards paint their own surfaces on top,
+   and Mica itself follows the system light/dark preference. A plain browser
+   (dev mode) has no Mica: it gets a themed, opaque backdrop instead, driven
+   by the same system preference. */
+:root {
+  color-scheme: light dark;
+}
+
 html,
 body,
 #root {
@@ -8,6 +15,16 @@ body,
   background: transparent;
   font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
+}
+
+html.browser-mode body {
+  background-color: #f3f3f3;
+}
+
+@media (prefers-color-scheme: dark) {
+  html.browser-mode body {
+    background-color: #202020;
+  }
 }
 
 pre {
