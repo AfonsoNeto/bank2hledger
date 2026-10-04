@@ -16,6 +16,10 @@ The result message reports how many rows were skipped. Leaving the checkbox
 unticked keeps the old behaviour: duplicates are only flagged in the preview,
 never acted on.
 
+![Import page with the checkbox ticked and the possible-duplicates panel open](screenshots/duplicates.png)
+
+![The dropdown open: matching journal entries with scores, above "None — import the new transaction as it is"](screenshots/duplicates-dropdown.png)
+
 ## Architecture
 
 - **Backend** (`src-tauri/src/commands.rs`): thin Tauri commands that wrap the

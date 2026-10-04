@@ -40,15 +40,33 @@ Arrow keys move between every above-threshold match, **Enter** declares the stag
 
 ## The Windows GUI
 
-The same review-before-you-approve workflow, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark). Drop exports in, preview what's new, import, verify — including the interactive duplicate resolution (tick **Resolve possible duplicates** on the Import page):
+The same review-before-you-approve workflow as the CLI loop above, in the same order, in an app styled after Windows 11 Settings (Fluent UI, Mica, light/dark).
 
-![Import page: per-account cards with a preview table of new transactions before importing](docs/screenshots/import-preview.png)
+**`init` / config — Home** (quick actions, workspace paths, setup checklist including an hledger check):
 
 ![Home: quick actions, workspace paths, and a setup checklist including an hledger check](docs/screenshots/home.png)
 
+**`import --dry-run` — Import** (per-account cards with a preview table of the new transactions):
+
+![Import page: per-account cards with a preview table of new transactions before importing](docs/screenshots/import-preview.png)
+
+**`import -i` — resolving duplicates** (tick *Resolve possible duplicates*; every flagged row gets a dropdown of matching journal entries plus "None — import as it is"):
+
+![Import page with duplicate resolution enabled: a panel listing possible duplicates, each with a dropdown of matching journal entries](docs/screenshots/duplicates.png)
+
+![The open dropdown: the matching journal entry with its score, above the default None option](docs/screenshots/duplicates-dropdown.png)
+
+**`status` — Balances** (current balances of the configured accounts, for comparison with the bank apps):
+
 ![Balances: current hledger balances of the configured accounts for comparison with the bank apps](docs/screenshots/balances.png)
 
+**Categorization — Rules** (the per-account hledger CSV rules files, which bank2hledger generates once and never rewrites):
+
 ![Rules: the per-account hledger CSV rules files, which bank2hledger generates once and never rewrites](docs/screenshots/rules.png)
+
+**Settings** (workspace paths and preferences):
+
+![Settings: workspace paths and preferences](docs/screenshots/settings.png)
 
 ## Why not just `hledger import`?
 
@@ -118,6 +136,8 @@ $ bank2hledger fetch
 4. **Import**: `bank2hledger import -i` — appends only new transactions; re-running or re-dropping files can never duplicate. `-i`/`--interactive` pauses at every possible duplicate (see above) and lets you decide with the arrow keys; without it, duplicates are only flagged for review.
 5. **Verify**: `bank2hledger status` — compare against the real balances in your bank apps.
 6. **Approve**: `git commit`. To reject a batch: `git checkout -- 2026.journal`, fix the rules, re-run.
+
+Every step has a GUI equivalent — the [Windows GUI](#the-windows-gui) section below shows each one in order.
 
 ## Privacy
 
